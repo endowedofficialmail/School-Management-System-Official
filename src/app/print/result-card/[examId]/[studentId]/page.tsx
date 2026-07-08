@@ -17,6 +17,9 @@ const GRADE_SCALE = [
 
 function ResultCardBody({ data }: { data: StudentFullResult }) {
   const { exam, student, school, results, totalObtained, totalPossible, percentage, overallGrade, passed, rank, totalRanked, subjectsPassed, subjectsFailed } = data
+  if (!school?.name) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', color: '#b45309' }}>⚠️ School name not configured. Please update school profile before printing.</div>
+  }
   const fullName = `${student.firstName} ${student.lastName}`
   const schoolInitials = (school?.name ?? 'S').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()
 

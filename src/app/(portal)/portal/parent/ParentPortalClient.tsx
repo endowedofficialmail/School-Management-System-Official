@@ -41,6 +41,7 @@ export default function ParentPortalClient({
   const currentVoucher = student.vouchers[0]
   const pendingAmount = selected.pendingAmount
   const lastExam = selected.latestPerformance
+  const advanceBalance = Number(student.advanceBalance ?? 0)
 
   return (
     <div className="space-y-4 text-[15px]">
@@ -91,6 +92,14 @@ export default function ParentPortalClient({
               </Badge>
             </div>
           </div>
+          {advanceBalance > 0 && (
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+              <p className="text-sm font-semibold text-blue-800">💙 Advance Credit: {formatRs(advanceBalance)}</p>
+              <p className="text-xs text-blue-700 mt-0.5">
+                This will be automatically adjusted in the next fee voucher.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
 

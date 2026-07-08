@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -21,9 +22,16 @@ const loginSchema = z.object({
 
 type LoginFormData = z.infer<typeof loginSchema>
 
-export default function LoginForm({ schoolName }: { schoolName: string }) {
+export default function LoginForm({
+  schoolName,
+  schoolLogoUrl,
+}: {
+  schoolName: string
+  schoolLogoUrl?: string | null
+}) {
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
+  const initials = schoolName.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()
 
   const {
     register,
@@ -50,9 +58,25 @@ export default function LoginForm({ schoolName }: { schoolName: string }) {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200 px-4 py-12">
       <div className="w-full max-w-md">
         <div className="flex flex-col items-center mb-8">
-          <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-primary mb-4 shadow-lg">
-            <GraduationCap className="h-8 w-8 text-primary-foreground" />
-          </div>
+          {schoolLogoUrl ? (
+            <div className="mb-4 flex items-center justify-center rounded-2xl bg-white px-4 py-3 shadow-lg">
+              <Image
+                src={schoolLogoUrl}
+                alt={`${schoolName} logo`}
+                width={140}
+                height={80}
+                className="max-h-20 w-auto object-contain"
+              />
+            </div>
+          ) : (
+            <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-primary mb-4 shadow-lg">
+              {initials ? (
+                <span className="text-lg font-bold text-primary-foreground">{initials}</span>
+              ) : (
+                <GraduationCap className="h-8 w-8 text-primary-foreground" />
+              )}
+            </div>
+          )}
           <h1 className="text-2xl font-bold text-slate-800 text-center">{schoolName}</h1>
           <p className="text-slate-500 text-sm mt-1">Administration Portal</p>
         </div>

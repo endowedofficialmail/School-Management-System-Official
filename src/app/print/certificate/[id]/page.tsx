@@ -32,6 +32,13 @@ export default function PrintCertificatePage() {
   }
 
   const { certificate, school } = data
+  if (!school?.name) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-6 text-center text-sm text-amber-700">
+        ⚠️ School name not configured. Please update school profile before printing.
+      </div>
+    )
+  }
   const initials = (school?.name || 'School')
     .split(' ')
     .map((p) => p[0])

@@ -1,6 +1,6 @@
 import { getServerSession } from 'next-auth'
 import Link from 'next/link'
-import { School, Users, UserCircle, Settings } from 'lucide-react'
+import { School, Users, UserCircle, Settings, ArrowUpCircle } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { getAllClasses } from '@/lib/actions/settings'
 import BackButton from '@/components/shared/BackButton'
@@ -96,16 +96,28 @@ export default async function ClassesPage() {
                 {/* Manage button — separate link, NOT inside the card link */}
                 {isAdmin && (
                   <div className="px-5 pb-4 pt-3 border-t">
-                    <Link
-                      href="/settings/classes"
-                      className={cn(
-                        buttonVariants({ variant: 'outline', size: 'sm' }),
-                        'w-full justify-center gap-1.5',
-                      )}
-                    >
-                      <Settings className="h-3.5 w-3.5" />
-                      Manage
-                    </Link>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Link
+                        href={`/classes/promote/${cls.id}`}
+                        className={cn(
+                          buttonVariants({ variant: 'outline', size: 'sm' }),
+                          'w-full justify-center gap-1.5 border-indigo-200 text-indigo-700 hover:bg-indigo-50',
+                        )}
+                      >
+                        <ArrowUpCircle className="h-3.5 w-3.5" />
+                        Promote
+                      </Link>
+                      <Link
+                        href="/settings/classes"
+                        className={cn(
+                          buttonVariants({ variant: 'outline', size: 'sm' }),
+                          'w-full justify-center gap-1.5',
+                        )}
+                      >
+                        <Settings className="h-3.5 w-3.5" />
+                        Manage
+                      </Link>
+                    </div>
                   </div>
                 )}
               </CardContent>

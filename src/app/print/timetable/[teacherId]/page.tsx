@@ -53,6 +53,14 @@ export default function PrintTimetablePage() {
   }
 
   const { teacher, school } = data
+  const schoolInitials = (school?.name ?? 'S').split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase()
+  if (!school?.name) {
+    return (
+      <div className="flex items-center justify-center min-h-screen text-amber-700">
+        ⚠️ School name not configured. Please update school profile before printing.
+      </div>
+    )
+  }
 
   // Build sorted time slots and grid
   const timeSlots = Array.from(new Set(teacher.timetableEntries.map((e) => e.startTime))).sort()
@@ -108,9 +116,21 @@ export default function PrintTimetablePage() {
 
         {/* School header */}
         <div className="header">
-          <h1>{school?.name ?? 'School Name'}</h1>
-          {school?.address && <p>{school.address}</p>}
-          {school?.phone && <p>Tel: {school.phone}</p>}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+            {school?.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={school.logoUrl} alt="logo" style={{ width: 42, height: 42, objectFit: 'contain' }} />
+            ) : (
+              <div style={{ width: 42, height: 42, borderRadius: '50%', background: '#1e3a5f', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                {schoolInitials}
+              </div>
+            )}
+            <div>
+              <h1>{school?.name ?? 'School Name'}</h1>
+              {school?.address && <p>{school.address}</p>}
+              {school?.phone && <p>Tel: {school.phone}</p>}
+            </div>
+          </div>
         </div>
 
         {/* Report title */}

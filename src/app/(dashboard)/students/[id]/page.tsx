@@ -5,6 +5,7 @@ import { ArrowLeft, Pencil, Award } from 'lucide-react'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { UserRole } from '@/types'
+import { cn } from '@/lib/utils'
 
 import { buttonVariants } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -16,6 +17,7 @@ import StudentFeeHistoryTab from './StudentFeeHistoryTab'
 import AttendanceCalendar from '@/components/portal/AttendanceCalendar'
 import Breadcrumb from '@/components/shared/Breadcrumb'
 import StudentCertificatesTab from '@/components/certificates/StudentCertificatesTab'
+import { getStudentPromotionHistory } from '@/lib/actions/promotions'
 
 const statusConfig = {
   ACTIVE: { label: 'Active', className: 'bg-emerald-100 text-emerald-700' },
@@ -42,7 +44,11 @@ export default async function StudentDetailPage({
   const id = Number(params.id)
   if (isNaN(id)) notFound()
 
-  const [student, session] = await Promise.all([getStudentById(id), getServerSession(authOptions)])
+  const [student, session, promoHistory] = await Promise.all([
+    getStudentById(id),
+    getServerSession(authOptions),
+    getStudentPromotionHistory(id),
+  ])
   if (!student) notFound()
   const role = session?.user?.role as UserRole | undefined
   const userId = session?.user?.id ? Number(session.user.id) : 0
@@ -86,11 +92,18 @@ export default async function StudentDetailPage({
               <p className="text-sm font-mono text-muted-foreground">
                 {student.registrationNumber}
               </p>
-              <span
-                className={`inline-flex items-center self-start px-2.5 py-0.5 rounded-full text-xs font-medium mt-1 ${status.className}`}
-              >
-                {status.label}
-              </span>
+              <div className="flex flex-wrap items-center gap-2 mt-1">
+                <span
+                  className={`inline-flex items-center self-start px-2.5 py-0.5 rounded-full text-xs font-medium ${status.className}`}
+                >
+                  {status.label}
+                </span>
+                {Number(student.advanceBalance) > 0 && (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                    Advance Credit: Rs. {Number(student.advanceBalance).toLocaleString('en-PK')}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         </CardContent>
@@ -156,11 +169,58 @@ export default async function StudentDetailPage({
               </CardContent>
             </Card>
           </div>
+
+          <Card className="mt-6 shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                Promotion History
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {promoHistory.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No promotion records yet.</p>
+              ) : (
+                <div className="space-y-4">
+                  {promoHistory.map((r) => (
+                    <div key={r.id} className="flex gap-3">
+                      <div className={cn(
+                        'mt-1 h-2.5 w-2.5 rounded-full shrink-0',
+                        r.wasPromoted ? 'bg-emerald-500' : 'bg-red-500',
+                      )} />
+                      <div className="min-w-0">
+                        <p className={cn('text-sm font-semibold', r.wasPromoted ? 'text-emerald-700' : 'text-red-700')}>
+                          {new Date(r.promotedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}{' '}
+                          — {r.wasPromoted ? 'Promoted' : 'Held Back'}
+                        </p>
+                        <p className="text-sm text-slate-700">
+                          {r.fromClass.name}–{r.fromClass.section} → {r.toClass.name}–{r.toClass.section}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Promoted by: {r.promotedBy.name} • {r.fromAcademicYear.name} → {r.toAcademicYear.name}
+                        </p>
+                        {!r.wasPromoted && r.notes && (
+                          <p className="text-xs text-red-700 mt-1">
+                            Reason: {r.notes}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* Fee History tab */}
         <TabsContent value="fees" className="pt-4">
-          <StudentFeeHistoryTab studentId={id} />
+          <StudentFeeHistoryTab
+            studentId={id}
+            advanceBalance={Number(student.advanceBalance)}
+            isAdmin={role === 'ADMIN'}
+            adminId={userId}
+            adminName={session?.user?.name ?? 'Admin'}
+          />
         </TabsContent>
 
         {/* Attendance tab */}

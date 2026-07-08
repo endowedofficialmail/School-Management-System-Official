@@ -11,6 +11,8 @@ interface DashboardShellProps {
   userRole: UserRole
   userEmail?: string
   schoolName: string
+  schoolLogoUrl?: string | null
+  banner?: React.ReactNode
 }
 
 export default function DashboardShell({
@@ -18,6 +20,8 @@ export default function DashboardShell({
   userName,
   userRole,
   schoolName,
+  schoolLogoUrl,
+  banner,
 }: DashboardShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -28,6 +32,7 @@ export default function DashboardShell({
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         schoolName={schoolName}
+        schoolLogoUrl={schoolLogoUrl}
       />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <Header
@@ -35,6 +40,7 @@ export default function DashboardShell({
           userRole={userRole}
           onMenuClick={() => setSidebarOpen(true)}
         />
+        {banner}
         <main className="flex-1 overflow-y-auto p-4 md:p-6">
           {children}
         </main>

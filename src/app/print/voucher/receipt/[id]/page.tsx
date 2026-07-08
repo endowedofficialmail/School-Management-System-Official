@@ -16,7 +16,7 @@ export default function PrintReceiptPage() {
   }, [id])
 
   useEffect(() => {
-    if (!loading && data && (data.status === 'PAID' || data.status === 'PARTIAL')) {
+    if (!loading && data && (data.status === 'PAID' || data.status === 'PARTIAL' || data.status === 'ADVANCE')) {
       const t = setTimeout(() => window.print(), 600)
       return () => clearTimeout(t)
     }
@@ -30,7 +30,7 @@ export default function PrintReceiptPage() {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', fontFamily: 'Arial', color: 'red' }}>Voucher not found.</div>
   }
 
-  if (data.status !== 'PAID' && data.status !== 'PARTIAL') {
+  if (data.status !== 'PAID' && data.status !== 'PARTIAL' && data.status !== 'ADVANCE') {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', fontFamily: 'Arial', color: '#64748b' }}>
         This voucher has not been paid yet.
@@ -38,6 +38,7 @@ export default function PrintReceiptPage() {
     )
   }
 
+  const lastPayment = data.paymentHistory?.[data.paymentHistory.length - 1]
   const voucher = {
     voucherNumber: data.voucherNumber,
     month: data.month,
@@ -46,13 +47,28 @@ export default function PrintReceiptPage() {
     dueDate: data.dueDate,
     status: data.status,
     totalAmount: Number(data.totalAmount),
+    originalAmount: Number(data.originalAmount) || Number(data.totalAmount),
+    appliedAdvance: Number(data.appliedAdvance),
     paidAmount: Number(data.paidAmount),
+    advanceAmount: Number(data.advanceAmount),
+    remainingAmount: Number(data.remainingAmount),
     paidDate: data.paidDate,
     receivedBy: data.receivedBy,
     notes: data.notes,
+    paymentMode: lastPayment?.paymentMode ?? null,
     student: data.student,
     items: data.items.map((i) => ({ description: i.description, amount: Number(i.amount) })),
     school: data.school,
+    paymentHistory: data.paymentHistory.map((p) => ({
+      amountPaid: Number(p.amountPaid),
+      paymentDate: p.paymentDate,
+      receivedBy: p.receivedBy,
+      paymentMode: p.paymentMode,
+    })),
+  }
+
+  if (!voucher.school?.name) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', fontFamily: 'Arial', color: '#b45309' }}>⚠️ School name not configured. Please update school profile before printing.</div>
   }
 
   return (

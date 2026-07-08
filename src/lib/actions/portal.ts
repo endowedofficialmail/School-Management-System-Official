@@ -145,7 +145,7 @@ export async function getParentPortalData(userId: number) {
                 take: 1,
               },
               vouchers: {
-                where: { status: { in: ['UNPAID', 'PARTIAL'] } },
+                where: { status: { in: ['UNPAID', 'PARTIAL', 'ADVANCE'] } },
                 include: { items: true },
               },
             },
@@ -162,11 +162,15 @@ export async function getParentPortalData(userId: number) {
       relation: link.relation,
       student: link.student,
       latestPerformance: link.student.performances[0] ?? null,
-      pendingVoucherCount: link.student.vouchers.length,
-      pendingAmount: link.student.vouchers.reduce(
-        (sum, v) => sum + (Number(v.totalAmount) - Number(v.paidAmount)),
-        0
-      ),
+      pendingVoucherCount: link.student.vouchers.filter((v) => v.status === 'UNPAID' || v.status === 'PARTIAL').length,
+      pendingAmount: link.student.vouchers
+        .filter((v) => v.status === 'UNPAID' || v.status === 'PARTIAL')
+        .reduce((sum, v) => {
+          if (v.status === 'PARTIAL') {
+            return sum + (Number(v.remainingAmount) || Math.max(0, Number(v.totalAmount) - Number(v.paidAmount)))
+          }
+          return sum + Number(v.totalAmount)
+        }, 0),
     })),
   }
 }

@@ -10,6 +10,7 @@ import {
   Plus,
   Settings,
   CalendarDays,
+  ArrowUpCircle,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -19,6 +20,7 @@ import { getClassById, getClassStats } from '@/lib/actions/settings'
 import { cn } from '@/lib/utils'
 import ClassStudentsTable from './ClassStudentsTable'
 import Breadcrumb from '@/components/shared/Breadcrumb'
+import { getPromotionHistory } from '@/lib/actions/promotions'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,10 +41,11 @@ export default async function ClassDetailPage({ params }: Props) {
   const id = Number(params.id)
   if (isNaN(id)) notFound()
 
-  const [session, cls, stats] = await Promise.all([
+  const [session, cls, stats, promoHistory] = await Promise.all([
     getServerSession(authOptions),
     getClassById(id),
     getClassStats(id),
+    getPromotionHistory({ classId: id }),
   ])
 
   if (!cls) notFound()
@@ -261,6 +264,13 @@ export default async function ClassDetailPage({ params }: Props) {
           <CardContent>
             <div className="flex flex-wrap gap-3">
               <Link
+                href={`/classes/promote/${id}`}
+                className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'gap-2 border-indigo-200 text-indigo-700 hover:bg-indigo-50')}
+              >
+                <ArrowUpCircle className="h-3.5 w-3.5" />
+                Promote Class
+              </Link>
+              <Link
                 href="/teachers/subjects"
                 className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'gap-2')}
               >
@@ -292,6 +302,65 @@ export default async function ClassDetailPage({ params }: Props) {
           </CardContent>
         </Card>
       )}
+
+      {/* ── Promotion History (last 5) ─────────────────────────────────────── */}
+      <Card className="shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Promotion History</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {promoHistory.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No promotion records for this class yet.</p>
+          ) : (
+            <>
+              {Object.values(
+                promoHistory.reduce((acc, r) => {
+                  const key = `${new Date(r.promotedAt).toDateString()}|${r.toClassId}|${r.promotedById}`
+                  if (!acc[key]) {
+                    acc[key] = {
+                      key,
+                      promotedAt: r.promotedAt,
+                      toClass: r.toClass,
+                      promotedBy: r.promotedBy,
+                      promotedCount: 0,
+                      heldCount: 0,
+                    }
+                  }
+                  if (r.wasPromoted) acc[key].promotedCount += 1
+                  else acc[key].heldCount += 1
+                  return acc
+                }, {} as Record<string, {
+                  key: string
+                  promotedAt: Date
+                  toClass: { name: string; section: string }
+                  promotedBy: { id: number; name: string }
+                  promotedCount: number
+                  heldCount: number
+                }>)
+              ).slice(0, 5).map((g) => (
+                <div key={g.key} className="flex items-start justify-between gap-3 rounded-lg border p-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">
+                      {new Date(g.promotedAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}{' '}
+                      — {g.promotedCount} students promoted to {g.toClass.name}–{g.toClass.section} by {g.promotedBy.name}
+                    </p>
+                    {g.heldCount > 0 && <p className="text-xs text-muted-foreground">{g.heldCount} held back</p>}
+                  </div>
+                  <Badge className="bg-emerald-100 text-emerald-700">
+                    Promoted
+                  </Badge>
+                </div>
+              ))}
+              <Link
+                href={`/classes/promote/history?classId=${id}`}
+                className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'mt-2')}
+              >
+                View Full History
+              </Link>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

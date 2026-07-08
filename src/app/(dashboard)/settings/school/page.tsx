@@ -1,7 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Save } from 'lucide-react'
+import Image from 'next/image'
+import { useEffect, useState } from 'react'
+import { z } from 'zod'
+import { Camera, Save } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -9,14 +11,34 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import BackButton from '@/components/shared/BackButton'
+import { compressAndConvertToBase64 } from '@/lib/utils'
 import { getSchoolProfile, updateSchoolProfile } from '@/lib/actions/settings'
 
+const profileSchema = z.object({
+  name: z.string().min(3, 'School name must be at least 3 characters'),
+  address: z.string().min(10, 'Please enter a complete address'),
+  phone: z.string().regex(/^(0[0-9]{2,3}-?[0-9]{7,8})$/, 'Enter a valid Pakistani phone number e.g. 051-1234567'),
+  email: z.string().email('Enter a valid email').optional().or(z.literal('')),
+  logoUrl: z.string().min(1, 'School logo is required'),
+})
+
+type ProfileValues = z.infer<typeof profileSchema>
+type Errors = Partial<Record<keyof ProfileValues, string>>
+
+const MAX_FILE_BYTES = 2 * 1024 * 1024
+
 export default function SchoolProfilePage() {
-  const [form, setForm] = useState({
-    name: '', address: '', phone: '', email: '', logoUrl: '',
+  const [form, setForm] = useState<ProfileValues>({
+    name: '',
+    address: '',
+    phone: '',
+    email: '',
+    logoUrl: '',
   })
+  const [errors, setErrors] = useState<Errors>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [fileWarning, setFileWarning] = useState('')
 
   useEffect(() => {
     getSchoolProfile().then((school) => {
@@ -33,27 +55,55 @@ export default function SchoolProfilePage() {
     })
   }, [])
 
-  async function handleSave() {
-    if (!form.name.trim()) { toast.error('School name is required'); return }
-    setSaving(true)
+  function setField<K extends keyof ProfileValues>(key: K, value: ProfileValues[K]) {
+    setForm((f) => ({ ...f, [key]: value }))
+    setErrors((prev) => ({ ...prev, [key]: undefined }))
+  }
+
+  async function handleLogoChange(file?: File) {
+    if (!file) return
+    if (file.size > MAX_FILE_BYTES) {
+      setFileWarning('Image too large. Please use an image under 2MB')
+      setField('logoUrl', '')
+      return
+    }
+    setFileWarning('')
     try {
-      await updateSchoolProfile({
-        name: form.name.trim(),
-        address: form.address || undefined,
-        phone: form.phone || undefined,
-        email: form.email || undefined,
-        logoUrl: form.logoUrl || undefined,
-      })
-      toast.success('School profile updated')
+      const base64 = await compressAndConvertToBase64(file)
+      setField('logoUrl', base64)
     } catch {
-      toast.error('Failed to update school profile')
-    } finally {
-      setSaving(false)
+      toast.error('Failed to process image')
     }
   }
 
-  function field(key: keyof typeof form, value: string) {
-    setForm((f) => ({ ...f, [key]: value }))
+  async function handleSave() {
+    const parsed = profileSchema.safeParse(form)
+    if (!parsed.success) {
+      const nextErrors: Errors = {}
+      for (const issue of parsed.error.issues) {
+        const key = issue.path[0] as keyof ProfileValues
+        nextErrors[key] = issue.message
+      }
+      setErrors(nextErrors)
+      toast.error('Please fix the highlighted fields')
+      return
+    }
+
+    setSaving(true)
+    try {
+      await updateSchoolProfile({
+        name: form.name,
+        address: form.address,
+        phone: form.phone,
+        email: form.email || undefined,
+        logoUrl: form.logoUrl,
+      })
+      toast.success('School profile updated successfully')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update school profile')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -63,7 +113,7 @@ export default function SchoolProfilePage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">School Profile</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            This information appears on reports and the login page
+            This information appears on reports, certificates, and the login page
           </p>
         </div>
       </div>
@@ -84,71 +134,60 @@ export default function SchoolProfilePage() {
             </div>
           ) : (
             <>
-              <div className="space-y-1.5">
-                <Label htmlFor="school-name">School Name *</Label>
-                <Input
-                  id="school-name"
-                  placeholder="e.g. Bright Future Academy"
-                  value={form.name}
-                  onChange={(e) => field('name', e.target.value)}
-                />
+              <div className="space-y-2">
+                <Label>School Logo *</Label>
+                {form.logoUrl ? (
+                  <label className="group relative flex h-[100px] w-[100px] cursor-pointer overflow-hidden rounded-2xl border bg-slate-50">
+                    <Image src={form.logoUrl} alt="School logo" fill className="object-contain p-2" />
+                    <div className="absolute inset-0 hidden items-center justify-center bg-black/45 text-xs font-medium text-white group-hover:flex">
+                      Change Logo
+                    </div>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg,image/gif,image/webp"
+                      className="hidden"
+                      onChange={(e) => void handleLogoChange(e.target.files?.[0])}
+                    />
+                  </label>
+                ) : (
+                  <label className="flex cursor-pointer flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center hover:bg-slate-100">
+                    <Camera className="h-6 w-6 text-slate-500 mb-2" />
+                    <span className="text-sm font-medium text-slate-700">Upload School Logo</span>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg,image/gif,image/webp"
+                      className="hidden"
+                      onChange={(e) => void handleLogoChange(e.target.files?.[0])}
+                    />
+                  </label>
+                )}
+                {fileWarning && <p className="text-xs text-red-500">{fileWarning}</p>}
+                {errors.logoUrl && <p className="text-xs text-red-500">{errors.logoUrl}</p>}
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="address">Address</Label>
-                <Input
-                  id="address"
-                  placeholder="e.g. 123 Main Street, Lahore"
-                  value={form.address}
-                  onChange={(e) => field('address', e.target.value)}
-                />
+                <Label htmlFor="school-name">School Name *</Label>
+                <Input id="school-name" placeholder="e.g. Bright Future Academy" value={form.name} onChange={(e) => setField('name', e.target.value)} />
+                {errors.name && <p className="text-xs text-red-500">{errors.name}</p>}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="address">Address *</Label>
+                <Input id="address" placeholder="e.g. 45 Main Blvd, Lahore, Pakistan" value={form.address} onChange={(e) => setField('address', e.target.value)} />
+                {errors.address && <p className="text-xs text-red-500">{errors.address}</p>}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="phone">Phone</Label>
-                  <Input
-                    id="phone"
-                    placeholder="+92 300 0000000"
-                    value={form.phone}
-                    onChange={(e) => field('phone', e.target.value)}
-                  />
+                  <Label htmlFor="phone">Phone *</Label>
+                  <Input id="phone" placeholder="e.g. 051-1234567 or 0300-1234567" value={form.phone} onChange={(e) => setField('phone', e.target.value)} />
+                  {errors.phone && <p className="text-xs text-red-500">{errors.phone}</p>}
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="info@school.com"
-                    value={form.email}
-                    onChange={(e) => field('email', e.target.value)}
-                  />
+                  <Input id="email" type="email" placeholder="info@school.com" value={form.email} onChange={(e) => setField('email', e.target.value)} />
+                  {errors.email && <p className="text-xs text-red-500">{errors.email}</p>}
                 </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="logo">
-                  Logo URL{' '}
-                  <span className="text-muted-foreground font-normal text-xs">(optional)</span>
-                </Label>
-                <Input
-                  id="logo"
-                  placeholder="https://example.com/logo.png"
-                  value={form.logoUrl}
-                  onChange={(e) => field('logoUrl', e.target.value)}
-                />
-                {form.logoUrl && (
-                  <div className="mt-2 p-3 border rounded-lg bg-slate-50 inline-flex items-center gap-3">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={form.logoUrl}
-                      alt="School logo preview"
-                      className="h-12 w-12 object-contain rounded"
-                      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                    />
-                    <span className="text-xs text-muted-foreground">Logo preview</span>
-                  </div>
-                )}
               </div>
 
               <div className="pt-2">

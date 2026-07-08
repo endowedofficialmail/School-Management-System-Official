@@ -37,6 +37,7 @@ enum InvoiceStatus {
   PENDING
   PAID
   PARTIAL
+  ADVANCE
   WAIVED
 }
 
@@ -75,6 +76,7 @@ model User {
   studentProfile    StudentPortalProfile?
   parentProfile     Parent?
   issuedCertificates Certificate[] @relation("issuedCertificates")
+  promotionRecords  PromotionRecord[]
 }
 
 model School {
@@ -99,6 +101,8 @@ model AcademicYear {
   classes      Class[]
   feeStructures FeeStructure[]
   exams        Exam[]
+  promotionsFrom PromotionRecord[] @relation("PromotionFromYear")
+  promotionsTo   PromotionRecord[] @relation("PromotionToYear")
 }
 
 model Class {
@@ -117,6 +121,8 @@ model Class {
   attendance     Attendance[]
   exams          Exam[]
   timetableEntries TimetableEntry[]
+  promotionsFrom PromotionRecord[] @relation("PromotionFromClass")
+  promotionsTo   PromotionRecord[] @relation("PromotionToClass")
 
   @@unique([name, section, academicYearId])
 }
@@ -137,6 +143,7 @@ model Student {
   classId            Int
   status             StudentStatus @default(ACTIVE)
   admissionDate      DateTime      @default(now())
+  advanceBalance     Decimal       @db.Decimal(10, 2) @default(0)
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
@@ -148,9 +155,36 @@ model Student {
   portalProfile      StudentPortalProfile?
   parentLinks        ParentStudent[]
   certificates       Certificate[]
+  advanceLogs        AdvanceBalanceLog[]
+  promotionRecords   PromotionRecord[]
 
   @@index([classId])
   @@index([status])
+}
+
+model PromotionRecord {
+  id                 Int          @id @default(autoincrement())
+  student            Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId          Int
+  fromClass          Class        @relation("PromotionFromClass", fields: [fromClassId], references: [id])
+  fromClassId        Int
+  toClass            Class        @relation("PromotionToClass", fields: [toClassId], references: [id])
+  toClassId          Int
+  fromAcademicYear   AcademicYear @relation("PromotionFromYear", fields: [fromAcademicYearId], references: [id])
+  fromAcademicYearId Int
+  toAcademicYear     AcademicYear @relation("PromotionToYear", fields: [toAcademicYearId], references: [id])
+  toAcademicYearId   Int
+  promotedBy         User         @relation(fields: [promotedById], references: [id])
+  promotedById       Int
+  promotedAt         DateTime     @default(now())
+  wasPromoted        Boolean
+  notes              String?
+
+  @@index([studentId])
+  @@index([fromClassId])
+  @@index([toClassId])
+  @@index([fromAcademicYearId])
+  @@index([toAcademicYearId])
 }
 
 model Subject {
@@ -319,28 +353,35 @@ enum VoucherStatus {
   UNPAID
   PAID
   PARTIAL
+  ADVANCE
   CANCELLED
 }
 
 model FeeVoucher {
-  id            Int           @id @default(autoincrement())
-  voucherNumber String        @unique
-  student       Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  studentId     Int
-  month         Int
-  year          Int
-  issueDate     DateTime      @default(now())
-  dueDate       DateTime
-  status        VoucherStatus @default(UNPAID)
-  totalAmount   Decimal       @db.Decimal(10, 2)
-  paidAmount    Decimal       @db.Decimal(10, 2) @default(0)
-  paidDate      DateTime?
-  receivedBy    String?
-  notes         String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id               Int           @id @default(autoincrement())
+  voucherNumber    String        @unique
+  student          Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId        Int
+  month            Int
+  year             Int
+  issueDate        DateTime      @default(now())
+  dueDate          DateTime
+  status           VoucherStatus @default(UNPAID)
+  totalAmount      Decimal       @db.Decimal(10, 2)
+  originalAmount   Decimal       @db.Decimal(10, 2) @default(0)
+  appliedAdvance   Decimal       @db.Decimal(10, 2) @default(0)
+  paidAmount       Decimal       @db.Decimal(10, 2) @default(0)
+  advanceAmount    Decimal       @db.Decimal(10, 2) @default(0)
+  partialAmount    Decimal       @db.Decimal(10, 2) @default(0)
+  remainingAmount  Decimal       @db.Decimal(10, 2) @default(0)
+  paidDate         DateTime?
+  receivedBy       String?
+  notes            String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
-  items         FeeVoucherItem[]
+  items            FeeVoucherItem[]
+  paymentHistory   FeeVoucherPayment[]
 
   @@unique([studentId, month, year])
   @@index([studentId])
@@ -357,6 +398,35 @@ model FeeVoucherItem {
   createdAt   DateTime   @default(now())
 
   @@index([voucherId])
+}
+
+model FeeVoucherPayment {
+  id            Int        @id @default(autoincrement())
+  voucher       FeeVoucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  voucherId     Int
+  amountPaid    Decimal    @db.Decimal(10, 2)
+  paymentDate   DateTime
+  receivedBy    String
+  paymentMode   String     @default("Cash")
+  notes         String?
+  createdAt     DateTime   @default(now())
+
+  @@index([voucherId])
+}
+
+model AdvanceBalanceLog {
+  id               Int      @id @default(autoincrement())
+  student          Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId        Int
+  adjustmentAmount Decimal  @db.Decimal(10, 2)
+  previousBalance  Decimal  @db.Decimal(10, 2)
+  newBalance       Decimal  @db.Decimal(10, 2)
+  reason           String
+  adjustedBy       String
+  adminId          Int?
+  createdAt        DateTime @default(now())
+
+  @@index([studentId])
 }
 
 model DatesheetEntry {

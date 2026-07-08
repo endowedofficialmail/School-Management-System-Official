@@ -17,6 +17,9 @@ const GRADE_SCALE = [
 
 function SingleCard({ data }: { data: StudentFullResult }) {
   const { exam, student, school, results, totalObtained, totalPossible, percentage, overallGrade, passed, rank, totalRanked, subjectsPassed, subjectsFailed } = data
+  if (!school?.name) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', color: '#b45309' }}>⚠️ School name not configured. Please update school profile before printing.</div>
+  }
   const fullName = `${student.firstName} ${student.lastName}`
   const schoolInitials = (school?.name ?? 'S').split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()
 
@@ -25,9 +28,14 @@ function SingleCard({ data }: { data: StudentFullResult }) {
       {/* Header */}
       <div style={{ textAlign: 'center', borderBottom: '3px double #1a1a1a', paddingBottom: 10, marginBottom: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-          <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#1e3a5f', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 'bold', flexShrink: 0 }}>
-            {schoolInitials}
-          </div>
+          {school?.logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={school.logoUrl} alt="logo" style={{ width: 48, height: 48, objectFit: 'contain' }} />
+          ) : (
+            <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#1e3a5f', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 'bold', flexShrink: 0 }}>
+              {schoolInitials}
+            </div>
+          )}
           <div>
             <div style={{ fontSize: 18, fontWeight: 'bold', color: '#1e3a5f' }}>{school?.name ?? 'School'}</div>
             {school?.address && <div style={{ fontSize: 10, color: '#555' }}>{school.address}</div>}

@@ -12,6 +12,8 @@ export async function setupSystem(data: {
   schoolName: string
   address: string
   phone: string
+  email?: string
+  logoBase64: string
   adminName: string
   adminEmail: string
   adminPassword: string
@@ -31,6 +33,8 @@ export async function setupSystem(data: {
         name: data.schoolName,
         address: data.address,
         phone: data.phone,
+        email: data.email?.trim() || null,
+        logoUrl: data.logoBase64,
       },
     })
 

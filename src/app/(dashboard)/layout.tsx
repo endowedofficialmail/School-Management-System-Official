@@ -1,8 +1,9 @@
 import { getServerSession } from 'next-auth'
 import { redirect } from 'next/navigation'
 import { authOptions } from '@/lib/auth'
-import { prisma } from '@/lib/prisma'
+import { getSchoolProfile } from '@/lib/actions/settings'
 import DashboardShell from '@/components/layout/DashboardShell'
+import ProfileIncompleteBanner from '@/components/shared/ProfileIncompleteBanner'
 import { UserRole } from '@/types'
 
 export default async function DashboardLayout({
@@ -24,7 +25,7 @@ export default async function DashboardLayout({
     redirect('/portal/parent')
   }
 
-  const school = await prisma.school.findFirst({ select: { name: true } })
+  const school = await getSchoolProfile()
   const schoolName = school?.name ?? 'School Management'
 
   return (
@@ -33,6 +34,16 @@ export default async function DashboardLayout({
       userRole={(session.user.role as UserRole) ?? 'ADMIN'}
       userEmail={session.user.email ?? ''}
       schoolName={schoolName}
+      schoolLogoUrl={school?.logoUrl}
+      banner={
+        <ProfileIncompleteBanner
+          schoolName={school?.name}
+          address={school?.address}
+          phone={school?.phone}
+          logoUrl={school?.logoUrl}
+          userRole={session.user.role}
+        />
+      }
     >
       {children}
     </DashboardShell>

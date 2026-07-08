@@ -52,7 +52,7 @@ export async function getTimetableForPrint(teacherId: number) {
         },
       },
     }),
-    prisma.school.findFirst({ select: { name: true, address: true, phone: true } }),
+    prisma.school.findFirst({ select: { name: true, address: true, phone: true, logoUrl: true } }),
   ])
   if (!teacher) return null
   return { teacher, school }

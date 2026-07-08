@@ -1,5 +1,6 @@
 'use client'
 
+import Image from 'next/image'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
@@ -100,6 +101,7 @@ interface SidebarProps {
   isOpen: boolean
   onClose: () => void
   schoolName: string
+  schoolLogoUrl?: string | null
 }
 
 function NavLinks({
@@ -142,21 +144,34 @@ function NavLinks({
 function SidebarInner({
   role,
   schoolName,
+  schoolLogoUrl,
   onLinkClick,
 }: {
   role: UserRole
   schoolName: string
+  schoolLogoUrl?: string | null
   onLinkClick?: () => void
 }) {
   // Truncate long school names for the sidebar header
   const displayName = schoolName.length > 22 ? schoolName.slice(0, 20) + '…' : schoolName
+  const initials = schoolName.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase()
 
   return (
     <div className="flex h-full flex-col bg-white">
       <div className="flex h-16 shrink-0 items-center gap-2 border-b px-5">
-        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary shrink-0">
-          <GraduationCap className="h-4 w-4 text-primary-foreground" />
-        </div>
+        {schoolLogoUrl ? (
+          <Image
+            src={schoolLogoUrl}
+            alt={`${schoolName} logo`}
+            width={32}
+            height={32}
+            className="h-8 w-8 rounded-lg object-contain shrink-0 border border-slate-200 bg-white"
+          />
+        ) : (
+          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary shrink-0">
+            <span className="text-[11px] font-bold text-primary-foreground">{initials || 'SM'}</span>
+          </div>
+        )}
         <div className="flex flex-col leading-tight min-w-0">
           <span className="text-sm font-bold text-slate-900 truncate" title={schoolName}>
             {displayName}
@@ -172,18 +187,18 @@ function SidebarInner({
   )
 }
 
-export default function Sidebar({ role, isOpen, onClose, schoolName }: SidebarProps) {
+export default function Sidebar({ role, isOpen, onClose, schoolName, schoolLogoUrl }: SidebarProps) {
   return (
     <>
       {/* Desktop sidebar — always visible on md+ */}
       <aside className="hidden md:flex w-64 shrink-0 flex-col border-r bg-white h-screen sticky top-0 overflow-y-auto">
-        <SidebarInner role={role} schoolName={schoolName} />
+        <SidebarInner role={role} schoolName={schoolName} schoolLogoUrl={schoolLogoUrl} />
       </aside>
 
       {/* Mobile sidebar — rendered as Sheet */}
       <Sheet open={isOpen} onOpenChange={(open) => { if (!open) onClose() }}>
         <SheetContent side="left" className="w-64 p-0">
-          <SidebarInner role={role} schoolName={schoolName} onLinkClick={onClose} />
+          <SidebarInner role={role} schoolName={schoolName} schoolLogoUrl={schoolLogoUrl} onLinkClick={onClose} />
         </SheetContent>
       </Sheet>
     </>

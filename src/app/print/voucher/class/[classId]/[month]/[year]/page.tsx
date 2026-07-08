@@ -41,6 +41,14 @@ export default function PrintClassVouchersPage() {
     )
   }
 
+  if (!data.school?.name) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', fontFamily: 'Arial', color: '#b45309' }}>
+        ⚠️ School name not configured. Please update school profile before printing.
+      </div>
+    )
+  }
+
   return (
     <html lang="en">
       <head>
@@ -76,6 +84,13 @@ export default function PrintClassVouchersPage() {
             dueDate: v.dueDate,
             status: v.status,
             totalAmount: Number(v.totalAmount),
+            originalAmount: Number(v.originalAmount) || Number(v.totalAmount),
+            appliedAdvance: Number(v.appliedAdvance),
+            paidAmount: Number(v.paidAmount),
+            advanceAmount: Number(v.advanceAmount),
+            remainingAmount: Number(v.remainingAmount),
+            paidDate: v.paidDate,
+            receivedBy: v.receivedBy,
             student: v.student,
             items: v.items.map((i) => ({ description: i.description, amount: Number(i.amount) })),
             school: data.school,

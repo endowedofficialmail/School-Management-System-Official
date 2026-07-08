@@ -41,6 +41,7 @@ const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   PENDING:  { label: 'Pending',  cls: 'bg-yellow-100 text-yellow-700' },
   PAID:     { label: 'Paid',     cls: 'bg-emerald-100 text-emerald-700' },
   PARTIAL:  { label: 'Partial',  cls: 'bg-orange-100 text-orange-700' },
+  ADVANCE:  { label: 'Advance',  cls: 'bg-blue-100 text-blue-700' },
   WAIVED:   { label: 'Waived',   cls: 'bg-slate-100 text-slate-500' },
 }
 
@@ -242,6 +243,7 @@ export default function InvoicesPage() {
             <SelectItem value="ALL">All Status</SelectItem>
             <SelectItem value="PENDING">Pending</SelectItem>
             <SelectItem value="PARTIAL">Partial</SelectItem>
+            <SelectItem value="ADVANCE">Advance</SelectItem>
             <SelectItem value="PAID">Paid</SelectItem>
             <SelectItem value="WAIVED">Waived</SelectItem>
           </SelectContent>

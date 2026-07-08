@@ -4,7 +4,7 @@ export type StudentStatus = 'ACTIVE' | 'LEFT' | 'GRADUATED'
 
 export type FeeFrequency = 'MONTHLY' | 'QUARTERLY' | 'YEARLY' | 'ONETIME'
 
-export type InvoiceStatus = 'PENDING' | 'PAID' | 'PARTIAL' | 'WAIVED'
+export type InvoiceStatus = 'PENDING' | 'PAID' | 'PARTIAL' | 'ADVANCE' | 'WAIVED'
 
 export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LATE' | 'LEAVE'
 

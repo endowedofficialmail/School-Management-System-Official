@@ -21,19 +21,46 @@ export async function getSchoolProfile() {
 
 export async function updateSchoolProfile(data: {
   name: string
-  address?: string
-  phone?: string
+  address: string
+  phone: string
   email?: string
-  logoUrl?: string
+  logoUrl: string
 }) {
-  await prisma.school.upsert({
+  if (!data.name || data.name.trim().length < 3) {
+    throw new Error('School name is required (minimum 3 characters)')
+  }
+  if (!data.address || data.address.trim().length < 10) {
+    throw new Error('Complete address is required')
+  }
+  if (!data.phone || !/^(0[0-9]{2,3}-?[0-9]{7,8})$/.test(data.phone.trim())) {
+    throw new Error('Valid Pakistani phone number is required')
+  }
+  if (!data.logoUrl || data.logoUrl.trim().length === 0) {
+    throw new Error('School logo is required')
+  }
+
+  const school = await prisma.school.upsert({
     where: { id: 1 },
-    update: data,
-    create: { id: 1, ...data },
+    update: {
+      name: data.name.trim(),
+      address: data.address.trim(),
+      phone: data.phone.trim(),
+      email: data.email?.trim() || null,
+      logoUrl: data.logoUrl,
+    },
+    create: {
+      id: 1,
+      name: data.name.trim(),
+      address: data.address.trim(),
+      phone: data.phone.trim(),
+      email: data.email?.trim() || null,
+      logoUrl: data.logoUrl,
+    },
   })
   revalidateTag('school-profile')
   revalidatePath('/settings/school')
   revalidatePath('/login')
+  return school
 }
 
 // ─── Users ────────────────────────────────────────────────────────────────────

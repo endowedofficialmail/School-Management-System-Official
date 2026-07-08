@@ -4,7 +4,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import {
   Plus, Users, Search, MoreHorizontal, Printer, CheckCircle,
-  XCircle, Trash2, Receipt,
+  XCircle, Trash2, Receipt, FileText, Clock, TrendingUp, AlertCircle,
+  School, AlertTriangle, RotateCcw, Loader2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
@@ -30,10 +31,12 @@ import {
 
 import BackButton from '@/components/shared/BackButton'
 import Breadcrumb from '@/components/shared/Breadcrumb'
+import RecordPaymentDialog from '@/components/shared/RecordPaymentDialog'
 import { formatRs } from '@/components/vouchers/VoucherDocument'
 import {
   getVouchers, getVoucherDashboardStats, generateVouchersForClass,
-  generateVoucherForStudent, markVoucherPaid, cancelVoucher, deleteVoucher,
+  generateVoucherForStudent, generateVouchersForSchool,
+  resetVoucherPayment, cancelVoucher, deleteVoucher, getSchoolGenerationPreview,
   type VoucherWithDetails,
 } from '@/lib/actions/vouchers'
 import { getFeeStructures } from '@/lib/actions/fees'
@@ -50,7 +53,16 @@ const STATUS_BADGE: Record<VoucherStatus, string> = {
   UNPAID: 'bg-red-100 text-red-700 hover:bg-red-100',
   PAID: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100',
   PARTIAL: 'bg-orange-100 text-orange-700 hover:bg-orange-100',
+  ADVANCE: 'bg-blue-100 text-blue-700 hover:bg-blue-100',
   CANCELLED: 'bg-slate-100 text-slate-500 hover:bg-slate-100',
+}
+
+const STATUS_LABEL: Record<VoucherStatus, string> = {
+  UNPAID: 'Unpaid',
+  PAID: 'Paid',
+  PARTIAL: 'Partial',
+  ADVANCE: 'Advance Paid',
+  CANCELLED: 'Cancelled',
 }
 
 const now = new Date()
@@ -60,31 +72,42 @@ const CURRENT_YEAR = now.getFullYear()
 type FeeStructure = Awaited<ReturnType<typeof getFeeStructures>>[number]
 type ClassItem = Awaited<ReturnType<typeof getClasses>>[number]
 type StudentItem = Awaited<ReturnType<typeof getStudents>>[number]
+type SchoolGenResult = Awaited<ReturnType<typeof generateVouchersForSchool>>
+
+function remainingFor(v: VoucherWithDetails) {
+  if (v.status === 'PARTIAL') {
+    return Number(v.remainingAmount) || Math.max(0, Number(v.totalAmount) - Number(v.paidAmount))
+  }
+  if (v.status === 'UNPAID') return Number(v.totalAmount)
+  if (v.status === 'ADVANCE') return Number(v.advanceAmount)
+  return Math.max(0, Number(v.totalAmount) - Number(v.paidAmount))
+}
 
 export default function FeeVouchersPage() {
   const [vouchers, setVouchers] = useState<VoucherWithDetails[]>([])
-  const [stats, setStats] = useState({ totalVouchers: 0, paidCount: 0, unpaidCount: 0, pendingAmount: 0 })
+  const [stats, setStats] = useState({
+    totalVouchers: 0, paidCount: 0, unpaidCount: 0, partialCount: 0, advanceCount: 0, pendingAmount: 0,
+  })
   const [classes, setClasses] = useState<ClassItem[]>([])
   const [feeStructures, setFeeStructures] = useState<FeeStructure[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Filters
   const [filterMonth, setFilterMonth] = useState(String(CURRENT_MONTH))
   const [filterYear, setFilterYear] = useState(String(CURRENT_YEAR))
   const [filterClass, setFilterClass] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [search, setSearch] = useState('')
 
-  // Dialogs
   const [classDialogOpen, setClassDialogOpen] = useState(false)
   const [studentDialogOpen, setStudentDialogOpen] = useState(false)
+  const [schoolDialogOpen, setSchoolDialogOpen] = useState(false)
   const [paidDialogOpen, setPaidDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
+  const [resetDialogOpen, setResetDialogOpen] = useState(false)
   const [target, setTarget] = useState<VoucherWithDetails | null>(null)
   const [lastGeneratedClass, setLastGeneratedClass] = useState<{ classId: number; month: number; year: number } | null>(null)
 
-  // Generate class form
   const [classForm, setClassForm] = useState({
     classId: '', month: String(CURRENT_MONTH), year: String(CURRENT_YEAR),
     dueDate: format(new Date(CURRENT_YEAR, CURRENT_MONTH - 1, 10), 'yyyy-MM-dd'),
@@ -92,7 +115,6 @@ export default function FeeVouchersPage() {
   })
   const [generatingClass, setGeneratingClass] = useState(false)
 
-  // Generate student form
   const [studentForm, setStudentForm] = useState({
     studentId: '', month: String(CURRENT_MONTH), year: String(CURRENT_YEAR),
     dueDate: format(new Date(CURRENT_YEAR, CURRENT_MONTH - 1, 10), 'yyyy-MM-dd'),
@@ -102,9 +124,15 @@ export default function FeeVouchersPage() {
   const [studentOptions, setStudentOptions] = useState<StudentItem[]>([])
   const [generatingStudent, setGeneratingStudent] = useState(false)
 
-  // Mark paid form
-  const [paidForm, setPaidForm] = useState({ paidAmount: '', paidDate: format(new Date(), 'yyyy-MM-dd'), receivedBy: '', notes: '' })
-  const [markingPaid, setMarkingPaid] = useState(false)
+  const [schoolForm, setSchoolForm] = useState({
+    month: String(CURRENT_MONTH),
+    year: String(CURRENT_YEAR),
+    dueDate: format(new Date(CURRENT_YEAR, CURRENT_MONTH - 1, 10), 'yyyy-MM-dd'),
+    feeStructureIds: [] as number[],
+  })
+  const [schoolPreview, setSchoolPreview] = useState({ classCount: 0, studentCount: 0 })
+  const [generatingSchool, setGeneratingSchool] = useState(false)
+  const [schoolResult, setSchoolResult] = useState<SchoolGenResult | null>(null)
 
   const [actionLoading, setActionLoading] = useState(false)
 
@@ -120,7 +148,14 @@ export default function FeeVouchersPage() {
       getVoucherDashboardStats(Number(filterMonth), Number(filterYear)),
     ])
     setVouchers(v)
-    setStats({ totalVouchers: s.totalVouchers, paidCount: s.paidCount, unpaidCount: s.unpaidCount, pendingAmount: s.pendingAmount })
+    setStats({
+      totalVouchers: s.totalVouchers,
+      paidCount: s.paidCount,
+      unpaidCount: s.unpaidCount,
+      partialCount: s.partialCount,
+      advanceCount: s.advanceCount,
+      pendingAmount: s.pendingAmount,
+    })
     setLoading(false)
   }, [filterMonth, filterYear, filterClass, filterStatus])
 
@@ -132,7 +167,6 @@ export default function FeeVouchersPage() {
     loadData()
   }, [loadData])
 
-  // Student search
   useEffect(() => {
     if (!studentSearch.trim()) { setStudentOptions([]); return }
     const t = setTimeout(() => {
@@ -140,6 +174,12 @@ export default function FeeVouchersPage() {
     }, 300)
     return () => clearTimeout(t)
   }, [studentSearch])
+
+  useEffect(() => {
+    if (!schoolDialogOpen) return
+    setSchoolResult(null)
+    getSchoolGenerationPreview().then(setSchoolPreview)
+  }, [schoolDialogOpen])
 
   const filteredVouchers = useMemo(() => {
     if (!search.trim()) return vouchers
@@ -166,12 +206,51 @@ export default function FeeVouchersPage() {
     return studentForm.items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0)
   }, [studentForm.items])
 
+  const schoolAllClassFees = useMemo(
+    () => feeStructures.filter((f) => f.classId == null),
+    [feeStructures]
+  )
+
+  const schoolClassFeesGrouped = useMemo(() => {
+    const map = new Map<string, FeeStructure[]>()
+    for (const f of feeStructures) {
+      if (f.classId == null) continue
+      const cls = classes.find((c) => c.id === f.classId)
+      const label = cls ? `${cls.name} – ${cls.section}` : `Class #${f.classId}`
+      if (!map.has(label)) map.set(label, [])
+      map.get(label)!.push(f)
+    }
+    return Array.from(map.entries())
+  }, [feeStructures, classes])
+
+  const schoolPreviewAllClassTotal = useMemo(() => {
+    return schoolAllClassFees
+      .filter((f) => schoolForm.feeStructureIds.includes(f.id))
+      .reduce((s, f) => s + Number(f.amount), 0)
+  }, [schoolAllClassFees, schoolForm.feeStructureIds])
+
   function toggleFeeStructure(id: number) {
     setClassForm((f) => ({
       ...f,
       feeStructureIds: f.feeStructureIds.includes(id)
         ? f.feeStructureIds.filter((x) => x !== id)
         : [...f.feeStructureIds, id],
+    }))
+  }
+
+  function toggleSchoolFee(id: number) {
+    setSchoolForm((f) => ({
+      ...f,
+      feeStructureIds: f.feeStructureIds.includes(id)
+        ? f.feeStructureIds.filter((x) => x !== id)
+        : [...f.feeStructureIds, id],
+    }))
+  }
+
+  function toggleSelectAllSchoolFees(checked: boolean) {
+    setSchoolForm((f) => ({
+      ...f,
+      feeStructureIds: checked ? feeStructures.map((fs) => fs.id) : [],
     }))
   }
 
@@ -218,37 +297,39 @@ export default function FeeVouchersPage() {
     } finally { setGeneratingStudent(false) }
   }
 
-  function openMarkPaid(v: VoucherWithDetails) {
+  async function handleGenerateSchool() {
+    if (schoolForm.feeStructureIds.length === 0) { toast.error('Select at least one fee structure'); return }
+    setGeneratingSchool(true)
+    try {
+      const result = await generateVouchersForSchool({
+        month: Number(schoolForm.month),
+        year: Number(schoolForm.year),
+        dueDate: new Date(schoolForm.dueDate),
+        feeStructureIds: schoolForm.feeStructureIds,
+      })
+      setSchoolResult(result)
+      toast.success(`${result.totalCreated} vouchers created across the school`)
+      loadData()
+    } catch { toast.error('Failed to generate school vouchers') }
+    finally { setGeneratingSchool(false) }
+  }
+
+  function openRecordPayment(v: VoucherWithDetails) {
     setTarget(v)
-    const remaining = Number(v.totalAmount) - Number(v.paidAmount)
-    setPaidForm({
-      paidAmount: String(remaining),
-      paidDate: format(new Date(), 'yyyy-MM-dd'),
-      receivedBy: '',
-      notes: '',
-    })
     setPaidDialogOpen(true)
   }
 
-  async function handleMarkPaid() {
+  async function handleResetPayment() {
     if (!target) return
-    if (!paidForm.receivedBy.trim()) { toast.error('Received By is required'); return }
-    const amount = parseFloat(paidForm.paidAmount)
-    if (isNaN(amount) || amount <= 0) { toast.error('Enter a valid amount'); return }
-    setMarkingPaid(true)
+    setActionLoading(true)
     try {
-      await markVoucherPaid({
-        voucherId: target.id,
-        paidAmount: amount,
-        paidDate: new Date(paidForm.paidDate),
-        receivedBy: paidForm.receivedBy,
-        notes: paidForm.notes || undefined,
-      })
-      toast.success('Payment recorded')
-      setPaidDialogOpen(false)
+      await resetVoucherPayment(target.id)
+      toast.success('Payment reset to unpaid')
+      setResetDialogOpen(false)
       loadData()
-    } catch { toast.error('Failed to record payment') }
-    finally { setMarkingPaid(false) }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to reset payment')
+    } finally { setActionLoading(false) }
   }
 
   async function handleCancel() {
@@ -276,6 +357,9 @@ export default function FeeVouchersPage() {
     } finally { setActionLoading(false) }
   }
 
+  const allSchoolSelected =
+    feeStructures.length > 0 && schoolForm.feeStructureIds.length === feeStructures.length
+
   return (
     <div className="space-y-6">
       <Breadcrumb items={[
@@ -283,7 +367,6 @@ export default function FeeVouchersPage() {
         { label: 'Fees', href: '/fees' },
         { label: 'Vouchers' },
       ]} />
-      {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-center gap-3">
           <BackButton />
@@ -301,19 +384,27 @@ export default function FeeVouchersPage() {
             <Plus className="h-4 w-4" />
             Generate for Student
           </Button>
+          <Button
+            onClick={() => setSchoolDialogOpen(true)}
+            className="gap-2 bg-indigo-600 hover:bg-indigo-700 text-white"
+          >
+            <School className="h-4 w-4" />
+            Generate for School
+          </Button>
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
-          { label: 'Total Vouchers', value: stats.totalVouchers, cls: 'text-slate-800' },
-          { label: 'Paid', value: stats.paidCount, cls: 'text-emerald-700' },
-          { label: 'Unpaid', value: stats.unpaidCount, cls: 'text-red-700' },
-          { label: 'Pending Amount', value: formatRs(stats.pendingAmount), cls: 'text-orange-700' },
+          { label: 'Total Vouchers', value: stats.totalVouchers, cls: 'text-slate-800', icon: FileText },
+          { label: 'Paid', value: stats.paidCount, cls: 'text-emerald-700', icon: CheckCircle },
+          { label: 'Partial', value: stats.partialCount, cls: 'text-orange-700', icon: Clock },
+          { label: 'Advance', value: stats.advanceCount, cls: 'text-blue-700', icon: TrendingUp },
+          { label: 'Unpaid', value: stats.unpaidCount, cls: 'text-red-700', icon: AlertCircle },
         ].map((c) => (
           <Card key={c.label} className="shadow-sm">
             <CardContent className="p-4 text-center">
+              <c.icon className={cn('h-4 w-4 mx-auto mb-1', c.cls)} />
               <p className={cn('text-xl font-bold', c.cls)}>{c.value}</p>
               <p className="text-xs text-muted-foreground mt-1">{c.label}</p>
             </CardContent>
@@ -321,7 +412,6 @@ export default function FeeVouchersPage() {
         ))}
       </div>
 
-      {/* Filters */}
       <div className="flex flex-wrap gap-3">
         <Select value={filterMonth} onValueChange={(v) => setFilterMonth(v ?? String(CURRENT_MONTH))}>
           <SelectTrigger className="h-9 w-[140px]"><SelectValue /></SelectTrigger>
@@ -347,11 +437,11 @@ export default function FeeVouchersPage() {
           </SelectContent>
         </Select>
         <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v ?? '')}>
-          <SelectTrigger className="h-9 w-[140px]"><SelectValue placeholder="All Status" /></SelectTrigger>
+          <SelectTrigger className="h-9 w-[160px]"><SelectValue placeholder="All Status" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="">All Status</SelectItem>
-            {(['UNPAID', 'PAID', 'PARTIAL', 'CANCELLED'] as VoucherStatus[]).map((s) => (
-              <SelectItem key={s} value={s}>{s}</SelectItem>
+            {(['UNPAID', 'PAID', 'PARTIAL', 'ADVANCE', 'CANCELLED'] as VoucherStatus[]).map((s) => (
+              <SelectItem key={s} value={s}>{STATUS_LABEL[s]}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -361,7 +451,6 @@ export default function FeeVouchersPage() {
         </div>
       </div>
 
-      {/* Bulk print after generation */}
       {lastGeneratedClass && (
         <div className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
           <span className="text-emerald-800">Vouchers generated successfully.</span>
@@ -376,7 +465,6 @@ export default function FeeVouchersPage() {
         </div>
       )}
 
-      {/* Table */}
       <div className="rounded-xl border shadow-sm overflow-x-auto bg-white">
         <table className="w-full min-w-[800px] text-sm">
           <thead>
@@ -387,6 +475,7 @@ export default function FeeVouchersPage() {
               <th className="px-4 py-3 text-left font-semibold text-slate-700">Month/Year</th>
               <th className="px-4 py-3 text-right font-semibold text-slate-700">Total</th>
               <th className="px-4 py-3 text-right font-semibold text-slate-700">Paid</th>
+              <th className="px-4 py-3 text-right font-semibold text-slate-700">Remaining</th>
               <th className="px-4 py-3 text-center font-semibold text-slate-700">Status</th>
               <th className="px-4 py-3 text-right font-semibold text-slate-700">Actions</th>
             </tr>
@@ -394,18 +483,20 @@ export default function FeeVouchersPage() {
           <tbody className="divide-y">
             {loading ? (
               Array.from({ length: 5 }).map((_, i) => (
-                <tr key={i}>{Array.from({ length: 8 }).map((_, j) => (
+                <tr key={i}>{Array.from({ length: 9 }).map((_, j) => (
                   <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-20" /></td>
                 ))}</tr>
               ))
             ) : filteredVouchers.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-16 text-center text-muted-foreground">
+                <td colSpan={9} className="px-4 py-16 text-center text-muted-foreground">
                   No vouchers found. Generate vouchers for a class to get started.
                 </td>
               </tr>
             ) : (
-              filteredVouchers.map((v) => (
+              filteredVouchers.map((v) => {
+                const rem = remainingFor(v)
+                return (
                 <tr key={v.id} className="hover:bg-slate-50/50 transition-colors">
                   <td className="px-4 py-3 font-mono font-bold text-slate-900 text-xs">{v.voucherNumber}</td>
                   <td className="px-4 py-3 font-medium text-slate-800">
@@ -415,8 +506,22 @@ export default function FeeVouchersPage() {
                   <td className="px-4 py-3 text-slate-600">{MONTHS[v.month - 1]?.label} {v.year}</td>
                   <td className="px-4 py-3 text-right font-medium">{formatRs(Number(v.totalAmount))}</td>
                   <td className="px-4 py-3 text-right text-slate-600">{formatRs(Number(v.paidAmount))}</td>
+                  <td className={cn(
+                    'px-4 py-3 text-right font-medium text-sm',
+                    v.status === 'UNPAID' && 'text-red-700',
+                    v.status === 'PARTIAL' && 'text-orange-700',
+                    v.status === 'PAID' && 'text-emerald-700',
+                    v.status === 'ADVANCE' && 'text-blue-700',
+                    v.status === 'CANCELLED' && 'text-slate-400',
+                  )}>
+                    {v.status === 'CANCELLED' || v.status === 'PAID'
+                      ? (v.status === 'PAID' ? formatRs(0) : '—')
+                      : v.status === 'ADVANCE'
+                        ? `Advance: ${formatRs(rem)}`
+                        : formatRs(rem)}
+                  </td>
                   <td className="px-4 py-3 text-center">
-                    <Badge className={cn('text-xs', STATUS_BADGE[v.status])}>{v.status}</Badge>
+                    <Badge className={cn('text-xs', STATUS_BADGE[v.status])}>{STATUS_LABEL[v.status]}</Badge>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <DropdownMenu>
@@ -431,7 +536,7 @@ export default function FeeVouchersPage() {
                           <Printer className="h-4 w-4" />
                           Print Voucher
                         </DropdownMenuItem>
-                        {(v.status === 'PAID' || v.status === 'PARTIAL') && (
+                        {(v.status === 'PAID' || v.status === 'PARTIAL' || v.status === 'ADVANCE') && (
                           <DropdownMenuItem
                             className="flex items-center gap-2 cursor-pointer"
                             onClick={() => window.open(`/print/voucher/receipt/${v.id}`, '_blank')}
@@ -440,13 +545,31 @@ export default function FeeVouchersPage() {
                             Print Receipt
                           </DropdownMenuItem>
                         )}
-                        {v.status !== 'PAID' && v.status !== 'CANCELLED' && (
+                        {(v.status === 'UNPAID' || v.status === 'PARTIAL') && (
                           <DropdownMenuItem
                             className="flex items-center gap-2 cursor-pointer"
-                            onClick={() => openMarkPaid(v)}
+                            onClick={() => openRecordPayment(v)}
                           >
                             <CheckCircle className="h-4 w-4" />
-                            Mark as Paid
+                            Record Payment
+                          </DropdownMenuItem>
+                        )}
+                        {v.status === 'PARTIAL' && (
+                          <DropdownMenuItem
+                            className="flex items-center gap-2 cursor-pointer text-emerald-700"
+                            onClick={() => openRecordPayment(v)}
+                          >
+                            <Plus className="h-4 w-4" />
+                            Add Payment
+                          </DropdownMenuItem>
+                        )}
+                        {v.status === 'PARTIAL' && (
+                          <DropdownMenuItem
+                            className="flex items-center gap-2 cursor-pointer text-amber-700"
+                            onClick={() => { setTarget(v); setResetDialogOpen(true) }}
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                            Reset Payment
                           </DropdownMenuItem>
                         )}
                         {v.status === 'UNPAID' && (
@@ -474,7 +597,8 @@ export default function FeeVouchersPage() {
                     </DropdownMenu>
                   </td>
                 </tr>
-              ))
+                )
+              })
             )}
           </tbody>
         </table>
@@ -633,45 +757,202 @@ export default function FeeVouchersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Mark Paid Dialog */}
-      <Dialog open={paidDialogOpen} onOpenChange={setPaidDialogOpen}>
+      {/* Generate School Dialog */}
+      <Dialog open={schoolDialogOpen} onOpenChange={(open) => { setSchoolDialogOpen(open); if (!open) setSchoolResult(null) }}>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Generate Vouchers — Entire School</DialogTitle>
+            <DialogDescription className="text-amber-700">
+              This will generate fee vouchers for ALL active students across ALL classes in the current academic year.
+            </DialogDescription>
+          </DialogHeader>
+
+          {schoolResult ? (
+            <div className="space-y-4 py-2">
+              <div className="rounded-lg border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 border-b">
+                      <th className="px-3 py-2 text-left">Class</th>
+                      <th className="px-3 py-2 text-right">Created</th>
+                      <th className="px-3 py-2 text-right">Already Existed</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {schoolResult.classResults.map((r) => (
+                      <tr key={r.className}>
+                        <td className="px-3 py-2">{r.className}</td>
+                        <td className="px-3 py-2 text-right text-emerald-700 font-medium">{r.created}</td>
+                        <td className="px-3 py-2 text-right text-slate-500">{r.skipped}</td>
+                      </tr>
+                    ))}
+                    <tr className="bg-slate-50 font-semibold">
+                      <td className="px-3 py-2">Total</td>
+                      <td className="px-3 py-2 text-right text-emerald-700">{schoolResult.totalCreated}</td>
+                      <td className="px-3 py-2 text-right">{schoolResult.totalSkipped}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <Button variant="outline" disabled className="w-full gap-2 opacity-60">
+                <Printer className="h-4 w-4" />
+                Print All School Vouchers (coming soon)
+              </Button>
+              <DialogFooter>
+                <Button onClick={() => { setSchoolDialogOpen(false); setSchoolResult(null) }}>Done</Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-4 py-2">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Month *</Label>
+                    <Select
+                      value={schoolForm.month}
+                      onValueChange={(v) => {
+                        const month = v ?? String(CURRENT_MONTH)
+                        setSchoolForm((f) => ({
+                          ...f,
+                          month,
+                          dueDate: format(new Date(Number(f.year), Number(month) - 1, 10), 'yyyy-MM-dd'),
+                        }))
+                      }}
+                    >
+                      <SelectTrigger className="h-9 w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {MONTHS.map((m) => <SelectItem key={m.value} value={String(m.value)}>{m.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Year *</Label>
+                    <Input
+                      type="number"
+                      value={schoolForm.year}
+                      onChange={(e) => {
+                        const year = e.target.value
+                        setSchoolForm((f) => ({
+                          ...f,
+                          year,
+                          dueDate: format(new Date(Number(year), Number(f.month) - 1, 10), 'yyyy-MM-dd'),
+                        }))
+                      }}
+                      className="h-9"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Due Date *</Label>
+                  <Input type="date" value={schoolForm.dueDate} onChange={(e) => setSchoolForm((f) => ({ ...f, dueDate: e.target.value }))} className="h-9" />
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Fee Structures *</Label>
+                    <label className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input type="checkbox" checked={allSchoolSelected} onChange={(e) => toggleSelectAllSchoolFees(e.target.checked)} className="rounded" />
+                      Select All
+                    </label>
+                  </div>
+                  <div className="rounded-lg border p-3 space-y-3 max-h-56 overflow-y-auto">
+                    {schoolAllClassFees.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Applies to All Classes</p>
+                        {schoolAllClassFees.map((f) => (
+                          <label key={f.id} className="flex items-center gap-2 cursor-pointer text-sm">
+                            <input type="checkbox" checked={schoolForm.feeStructureIds.includes(f.id)} onChange={() => toggleSchoolFee(f.id)} className="rounded" />
+                            <span className="flex-1">{f.name}</span>
+                            <span className="text-muted-foreground">{formatRs(Number(f.amount))}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    {schoolClassFeesGrouped.map(([label, fees]) => (
+                      <div key={label} className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+                        {fees.map((f) => (
+                          <label key={f.id} className="flex items-center gap-2 cursor-pointer text-sm">
+                            <input type="checkbox" checked={schoolForm.feeStructureIds.includes(f.id)} onChange={() => toggleSchoolFee(f.id)} className="rounded" />
+                            <span className="flex-1">{f.name}</span>
+                            <span className="text-muted-foreground">{formatRs(Number(f.amount))}</span>
+                          </label>
+                        ))}
+                      </div>
+                    ))}
+                    {feeStructures.length === 0 && (
+                      <p className="text-sm text-muted-foreground">No fee structures found.</p>
+                    )}
+                  </div>
+                  <p className="text-sm font-medium text-indigo-700">
+                    Estimated amount per student (all-class fees): {formatRs(schoolPreviewAllClassTotal)}
+                  </p>
+                </div>
+
+                <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-900">
+                  This will generate vouchers for approximately <b>{schoolPreview.studentCount}</b> students across <b>{schoolPreview.classCount}</b> classes
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setSchoolDialogOpen(false)}>Cancel</Button>
+                <Button onClick={handleGenerateSchool} disabled={generatingSchool} className="gap-2 bg-indigo-600 hover:bg-indigo-700">
+                  {generatingSchool && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {generatingSchool ? 'Generating…' : 'Generate'}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <RecordPaymentDialog
+        open={paidDialogOpen}
+        onClose={() => { setPaidDialogOpen(false); setTarget(null) }}
+        onSuccess={() => loadData()}
+        voucher={target ? {
+          id: target.id,
+          voucherNumber: target.voucherNumber,
+          totalAmount: Number(target.totalAmount),
+          paidAmount: Number(target.paidAmount),
+          remainingAmount: Number(target.remainingAmount) || Math.max(0, Number(target.totalAmount) - Number(target.paidAmount)),
+          status: target.status,
+          student: {
+            id: target.studentId,
+            firstName: target.student.firstName,
+            lastName: target.student.lastName,
+          },
+        } : null}
+        paymentHistory={target?.paymentHistory?.map((p) => ({
+          id: p.id,
+          amountPaid: Number(p.amountPaid),
+          paymentDate: p.paymentDate,
+          receivedBy: p.receivedBy,
+          paymentMode: p.paymentMode,
+          notes: p.notes,
+        }))}
+      />
+
+      {/* Reset Payment Dialog */}
+      <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Mark as Paid</DialogTitle>
-            {target && (
-              <DialogDescription>
-                {target.student.firstName} {target.student.lastName} — {target.voucherNumber} — Total: {formatRs(Number(target.totalAmount))}
-              </DialogDescription>
-            )}
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+              Reset Payment
+            </DialogTitle>
+            <DialogDescription>
+              This will reset all payment records for this voucher back to UNPAID. Are you sure?
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div className="space-y-1.5">
-              <Label>Amount Paid *</Label>
-              <Input type="number" value={paidForm.paidAmount} onChange={(e) => setPaidForm((f) => ({ ...f, paidAmount: e.target.value }))} className="h-9" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Payment Date *</Label>
-              <Input type="date" value={paidForm.paidDate} onChange={(e) => setPaidForm((f) => ({ ...f, paidDate: e.target.value }))} className="h-9" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Received By *</Label>
-              <Input value={paidForm.receivedBy} onChange={(e) => setPaidForm((f) => ({ ...f, receivedBy: e.target.value }))} className="h-9" placeholder="Staff name" />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Notes</Label>
-              <Input value={paidForm.notes} onChange={(e) => setPaidForm((f) => ({ ...f, notes: e.target.value }))} className="h-9" placeholder="Optional" />
-            </div>
-          </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPaidDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleMarkPaid} disabled={markingPaid}>
-              {markingPaid ? 'Saving…' : 'Mark as Paid'}
+            <Button variant="outline" onClick={() => setResetDialogOpen(false)}>Keep</Button>
+            <Button variant="destructive" onClick={handleResetPayment} disabled={actionLoading}>
+              {actionLoading ? 'Resetting…' : 'Reset Payment'}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Cancel Dialog */}
       <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
@@ -689,7 +970,6 @@ export default function FeeVouchersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Dialog */}
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>

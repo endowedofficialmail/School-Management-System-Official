@@ -27,7 +27,15 @@ export default async function StudentPortalPage() {
   const attendance = await getStudentAttendanceSummary(student.id, now.getMonth() + 1, now.getFullYear())
   const currentVoucher = student.vouchers.find((v) => v.month === now.getMonth() + 1 && v.year === now.getFullYear())
   const lastExam = student.performances[0]
-  const outstanding = student.vouchers.reduce((sum, v) => sum + Math.max(0, Number(v.totalAmount) - Number(v.paidAmount)), 0)
+  const outstanding = student.vouchers
+    .filter((v) => v.status === 'UNPAID' || v.status === 'PARTIAL')
+    .reduce((sum, v) => {
+      if (v.status === 'PARTIAL') {
+        return sum + (Number(v.remainingAmount) || Math.max(0, Number(v.totalAmount) - Number(v.paidAmount)))
+      }
+      return sum + Number(v.totalAmount)
+    }, 0)
+  const advanceBalance = Number(student.advanceBalance ?? 0)
 
   return (
     <div className="space-y-4 text-[15px]">
@@ -48,6 +56,13 @@ export default async function StudentPortalPage() {
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-800">
           <p className="font-bold">Outstanding Balance: {formatRs(outstanding)}</p>
           <p className="text-sm">Please contact the school office for payment details.</p>
+        </div>
+      )}
+
+      {advanceBalance > 0 && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-blue-800">
+          <p className="font-bold">💙 You have {formatRs(advanceBalance)} advance credit</p>
+          <p className="text-sm">This will be automatically adjusted in your next fee voucher.</p>
         </div>
       )}
 
