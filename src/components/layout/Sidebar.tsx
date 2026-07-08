@@ -13,6 +13,7 @@ import {
   BarChart3,
   Settings,
   Award,
+  BadgeCheck,
 } from 'lucide-react'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
@@ -67,6 +68,12 @@ const navItems: NavItem[] = [
     href: '/results',
     icon: Award,
     roles: ['ADMIN', 'TEACHER'],
+  },
+  {
+    title: 'Certificates',
+    href: '/certificates',
+    icon: BadgeCheck,
+    roles: ['ADMIN', 'RECEPTIONIST'],
   },
   {
     title: 'Teachers',

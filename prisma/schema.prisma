@@ -47,6 +47,17 @@ enum AttendanceStatus {
   LEAVE
 }
 
+enum CertificateType {
+  BIRTH
+  SCHOOL_LEAVING
+  CHARACTER
+}
+
+enum CertificateStatus {
+  ISSUED
+  REVOKED
+}
+
 model User {
   id          Int        @id @default(autoincrement())
   name        String
@@ -63,6 +74,7 @@ model User {
   timetableEntries  TimetableEntry[]
   studentProfile    StudentPortalProfile?
   parentProfile     Parent?
+  issuedCertificates Certificate[] @relation("issuedCertificates")
 }
 
 model School {
@@ -135,6 +147,7 @@ model Student {
   vouchers           FeeVoucher[]
   portalProfile      StudentPortalProfile?
   parentLinks        ParentStudent[]
+  certificates       Certificate[]
 
   @@index([classId])
   @@index([status])
@@ -382,4 +395,39 @@ model TimetableEntry {
   @@unique([classId, subjectId, dayOfWeek, startTime])
   @@index([teacherId])
   @@index([classId])
+}
+
+model Certificate {
+  id                Int               @id @default(autoincrement())
+  certificateNumber String            @unique
+  type              CertificateType
+  status            CertificateStatus @default(ISSUED)
+  student           Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId         Int
+  issuedBy          User              @relation("issuedCertificates", fields: [issuedById], references: [id])
+  issuedById        Int
+  issueDate         DateTime          @default(now())
+
+  // Birth Certificate specific fields
+  birthPlace        String?
+  birthDate         DateTime?
+  fatherName        String?
+  motherName        String?
+  fatherCNIC        String?
+  motherCNIC        String?
+  fatherOccupation  String?
+
+  // School Leaving Certificate specific fields
+  dateOfLeaving     DateTime?
+  lastClass         String?
+  reasonForLeaving  String?
+  conductDuringStay String?
+
+  // Character Certificate specific fields
+  characterRemarks  String?
+  purpose           String?
+
+  notes             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }

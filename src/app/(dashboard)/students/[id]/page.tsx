@@ -1,7 +1,10 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { format } from 'date-fns'
-import { ArrowLeft, Pencil } from 'lucide-react'
+import { ArrowLeft, Pencil, Award } from 'lucide-react'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
+import { UserRole } from '@/types'
 
 import { buttonVariants } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -12,6 +15,7 @@ import StudentResultsTab from './StudentResultsTab'
 import StudentFeeHistoryTab from './StudentFeeHistoryTab'
 import AttendanceCalendar from '@/components/portal/AttendanceCalendar'
 import Breadcrumb from '@/components/shared/Breadcrumb'
+import StudentCertificatesTab from '@/components/certificates/StudentCertificatesTab'
 
 const statusConfig = {
   ACTIVE: { label: 'Active', className: 'bg-emerald-100 text-emerald-700' },
@@ -38,8 +42,10 @@ export default async function StudentDetailPage({
   const id = Number(params.id)
   if (isNaN(id)) notFound()
 
-  const student = await getStudentById(id)
+  const [student, session] = await Promise.all([getStudentById(id), getServerSession(authOptions)])
   if (!student) notFound()
+  const role = session?.user?.role as UserRole | undefined
+  const userId = session?.user?.id ? Number(session.user.id) : 0
 
   const fullName = `${student.firstName} ${student.lastName}`
   const initials = `${student.firstName[0]}${student.lastName[0]}`.toUpperCase()
@@ -97,6 +103,10 @@ export default async function StudentDetailPage({
           <TabsTrigger value="fees">Fee History</TabsTrigger>
           <TabsTrigger value="attendance">Attendance</TabsTrigger>
           <TabsTrigger value="results">Results</TabsTrigger>
+          <TabsTrigger value="certificates">
+            <Award className="h-3.5 w-3.5 mr-1" />
+            Certificates
+          </TabsTrigger>
         </TabsList>
 
         {/* Profile tab */}
@@ -161,6 +171,14 @@ export default async function StudentDetailPage({
         {/* Results tab */}
         <TabsContent value="results" className="pt-4">
           <StudentResultsTab studentId={id} />
+        </TabsContent>
+
+        <TabsContent value="certificates" className="pt-4">
+          {role && userId ? (
+            <StudentCertificatesTab studentId={id} role={role} userId={userId} />
+          ) : (
+            <p className="text-sm text-muted-foreground">Unable to load certificates.</p>
+          )}
         </TabsContent>
       </Tabs>
     </div>
