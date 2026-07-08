@@ -1,0 +1,385 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  TEACHER
+  RECEPTIONIST
+  PARENT
+  STUDENT
+}
+
+enum StudentStatus {
+  ACTIVE
+  LEFT
+  GRADUATED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+}
+
+enum FeeFrequency {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+  ONETIME
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  PARTIAL
+  WAIVED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  LEAVE
+}
+
+model User {
+  id          Int        @id @default(autoincrement())
+  name        String
+  email       String     @unique
+  password    String
+  role        UserRole   @default(TEACHER)
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  classes           Class[]
+  subjects          Subject[]
+  attendance        Attendance[]
+  timetableEntries  TimetableEntry[]
+  studentProfile    StudentPortalProfile?
+  parentProfile     Parent?
+}
+
+model School {
+  id        Int      @id @default(autoincrement())
+  name      String
+  address   String?
+  phone     String?
+  email     String?
+  logoUrl   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AcademicYear {
+  id           Int        @id @default(autoincrement())
+  name         String
+  startDate    DateTime
+  endDate      DateTime
+  isActive     Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+
+  classes      Class[]
+  feeStructures FeeStructure[]
+  exams        Exam[]
+}
+
+model Class {
+  id             Int          @id @default(autoincrement())
+  name           String
+  section        String
+  classTeacher   User?        @relation(fields: [classTeacherId], references: [id])
+  classTeacherId Int?
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  academicYearId Int
+  createdAt      DateTime     @default(now())
+
+  students       Student[]
+  subjects       Subject[]
+  feeStructures  FeeStructure[]
+  attendance     Attendance[]
+  exams          Exam[]
+  timetableEntries TimetableEntry[]
+
+  @@unique([name, section, academicYearId])
+}
+
+model Student {
+  id                 Int           @id @default(autoincrement())
+  registrationNumber String        @unique
+  firstName          String
+  lastName           String
+  dateOfBirth        DateTime?
+  gender             Gender
+  address            String?
+  guardianName       String
+  guardianPhone      String
+  guardianCNIC       String?
+  photo              String?
+  class              Class         @relation(fields: [classId], references: [id])
+  classId            Int
+  status             StudentStatus @default(ACTIVE)
+  admissionDate      DateTime      @default(now())
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  feeInvoices        FeeInvoice[]
+  attendance         Attendance[]
+  results            Result[]
+  performances       ExamPerformance[]
+  vouchers           FeeVoucher[]
+  portalProfile      StudentPortalProfile?
+  parentLinks        ParentStudent[]
+
+  @@index([classId])
+  @@index([status])
+}
+
+model Subject {
+  id        Int      @id @default(autoincrement())
+  name      String
+  class     Class    @relation(fields: [classId], references: [id])
+  classId   Int
+  teacher   User?    @relation(fields: [teacherId], references: [id])
+  teacherId Int?
+  createdAt DateTime @default(now())
+
+  results          Result[]
+  datesheetEntries DatesheetEntry[]
+  timetableEntries TimetableEntry[]
+}
+
+model FeeStructure {
+  id             Int          @id @default(autoincrement())
+  name           String
+  amount         Decimal      @db.Decimal(10, 2)
+  class          Class?       @relation(fields: [classId], references: [id])
+  classId        Int?
+  frequency      FeeFrequency @default(MONTHLY)
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  academicYearId Int
+  createdAt      DateTime     @default(now())
+
+  invoices       FeeInvoice[]
+}
+
+model FeeInvoice {
+  id               Int           @id @default(autoincrement())
+  student          Student       @relation(fields: [studentId], references: [id])
+  studentId        Int
+  feeStructure     FeeStructure  @relation(fields: [feeStructureId], references: [id])
+  feeStructureId   Int
+  amount           Decimal       @db.Decimal(10, 2)
+  dueDate          DateTime
+  month            Int?
+  year             Int
+  status           InvoiceStatus @default(PENDING)
+  createdAt        DateTime      @default(now())
+
+  payments         FeePayment[]
+
+  @@unique([studentId, feeStructureId, month, year])
+  @@index([status])
+  @@index([year])
+  @@index([studentId])
+}
+
+model FeePayment {
+  id          Int        @id @default(autoincrement())
+  invoice     FeeInvoice @relation(fields: [invoiceId], references: [id])
+  invoiceId   Int
+  amountPaid  Decimal    @db.Decimal(10, 2)
+  paidAt      DateTime   @default(now())
+  receivedBy  String
+  notes       String?
+  createdAt   DateTime   @default(now())
+}
+
+model Attendance {
+  id        Int              @id @default(autoincrement())
+  student   Student          @relation(fields: [studentId], references: [id])
+  studentId Int
+  class     Class            @relation(fields: [classId], references: [id])
+  classId   Int
+  date      DateTime         @db.Date
+  status    AttendanceStatus @default(PRESENT)
+  markedBy  User             @relation(fields: [userId], references: [id])
+  userId    Int
+  createdAt DateTime         @default(now())
+
+  @@unique([studentId, date])
+  @@index([classId])
+  @@index([date])
+}
+
+model Exam {
+  id             Int          @id @default(autoincrement())
+  name           String
+  class          Class        @relation(fields: [classId], references: [id])
+  classId        Int
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+  academicYearId Int
+  startDate      DateTime
+  endDate        DateTime
+  createdAt      DateTime     @default(now())
+
+  results           Result[]
+  datesheetEntries  DatesheetEntry[]
+  performances      ExamPerformance[]
+}
+
+model Result {
+  id             Int      @id @default(autoincrement())
+  exam           Exam     @relation(fields: [examId], references: [id])
+  examId         Int
+  student        Student  @relation(fields: [studentId], references: [id])
+  studentId      Int
+  subject        Subject  @relation(fields: [subjectId], references: [id])
+  subjectId      Int
+  marksObtained  Decimal  @db.Decimal(5, 2)
+  totalMarks     Decimal  @db.Decimal(5, 2)
+  grade          String?
+  remarks        String?
+  createdAt      DateTime @default(now())
+
+  @@unique([examId, studentId, subjectId])
+  @@index([examId])
+  @@index([studentId])
+}
+
+model ExamPerformance {
+  id                 Int      @id @default(autoincrement())
+  exam               Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  examId             Int
+  student            Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId          Int
+  totalMarksObtained Decimal  @db.Decimal(8, 2)
+  totalPossibleMarks Decimal  @db.Decimal(8, 2)
+  percentage         Decimal  @db.Decimal(5, 2)
+  grade              String
+  rank               Int?
+  isPassed           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([examId, studentId])
+}
+
+model Parent {
+  id        Int             @id @default(autoincrement())
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int             @unique
+  students  ParentStudent[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+}
+
+model ParentStudent {
+  id        Int      @id @default(autoincrement())
+  parent    Parent   @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  parentId  Int
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId Int
+  relation  String
+  createdAt DateTime @default(now())
+
+  @@unique([parentId, studentId])
+  @@index([studentId])
+}
+
+model StudentPortalProfile {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int      @unique
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId Int      @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum VoucherStatus {
+  UNPAID
+  PAID
+  PARTIAL
+  CANCELLED
+}
+
+model FeeVoucher {
+  id            Int           @id @default(autoincrement())
+  voucherNumber String        @unique
+  student       Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId     Int
+  month         Int
+  year          Int
+  issueDate     DateTime      @default(now())
+  dueDate       DateTime
+  status        VoucherStatus @default(UNPAID)
+  totalAmount   Decimal       @db.Decimal(10, 2)
+  paidAmount    Decimal       @db.Decimal(10, 2) @default(0)
+  paidDate      DateTime?
+  receivedBy    String?
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  items         FeeVoucherItem[]
+
+  @@unique([studentId, month, year])
+  @@index([studentId])
+  @@index([status])
+  @@index([month, year])
+}
+
+model FeeVoucherItem {
+  id          Int        @id @default(autoincrement())
+  voucher     FeeVoucher @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+  voucherId   Int
+  description String
+  amount      Decimal    @db.Decimal(10, 2)
+  createdAt   DateTime   @default(now())
+
+  @@index([voucherId])
+}
+
+model DatesheetEntry {
+  id          Int      @id @default(autoincrement())
+  exam        Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  examId      Int
+  subject     Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  subjectId   Int
+  date        DateTime @db.Date
+  startTime   String
+  endTime     String
+  room        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([examId, subjectId])
+  @@index([examId])
+}
+
+model TimetableEntry {
+  id            Int      @id @default(autoincrement())
+  teacher       User     @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  teacherId     Int
+  subject       Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  subjectId     Int
+  class         Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  classId       Int
+  dayOfWeek     Int
+  startTime     String
+  endTime       String
+  periodNumber  Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([teacherId, dayOfWeek, startTime])
+  @@unique([classId, subjectId, dayOfWeek, startTime])
+  @@index([teacherId])
+  @@index([classId])
+}
