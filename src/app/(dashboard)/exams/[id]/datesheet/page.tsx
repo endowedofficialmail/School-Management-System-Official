@@ -93,8 +93,15 @@ export default function DatesheetPage() {
       setEntries(ds)
       setPrintData(pd)
       if (ex) {
-        const subs = await getSubjectsByClass(ex.classId)
-        setSubjects(subs)
+        const classIds = ex.examClasses?.length
+          ? ex.examClasses.map((ec) => ec.classId)
+          : ex.classId
+            ? [ex.classId]
+            : []
+        const allSubs = await Promise.all(classIds.map((cid) => getSubjectsByClass(cid)))
+        const merged = new Map<number, SubjectWithTeacher>()
+        allSubs.flat().forEach((s) => merged.set(s.id, s))
+        setSubjects(Array.from(merged.values()))
       }
     } finally {
       setLoading(false)
@@ -241,7 +248,12 @@ export default function DatesheetPage() {
     )
   }
 
-  const examTitle = `${exam.name} — ${exam.class.name} ${exam.class.section}`
+  const examClassLabel = exam.examClasses?.length
+    ? exam.examClasses.map((ec) => `${ec.class.name} ${ec.class.section}`).join(', ')
+    : exam.class
+      ? `${exam.class.name} ${exam.class.section}`
+      : 'All Classes'
+  const examTitle = `${exam.name} — ${examClassLabel}`
 
   return (
     <>
@@ -264,7 +276,7 @@ export default function DatesheetPage() {
                 {examTitle}
               </h1>
               <p className="text-sm text-muted-foreground mt-0.5">
-                {exam.class.name} &ndash; {exam.class.section} &bull; {entries.length} entr{entries.length === 1 ? 'y' : 'ies'} scheduled
+                {examClassLabel} &bull; {entries.length} entr{entries.length === 1 ? 'y' : 'ies'} scheduled
               </p>
             </div>
           </div>
@@ -485,7 +497,7 @@ export default function DatesheetPage() {
               <h2 className="text-xl font-bold uppercase tracking-wide">Examination Datesheet</h2>
               <p className="text-base font-semibold">{printData.exam.name}</p>
               <p className="text-sm">
-                Class: {printData.exam.class.name} &ndash; {printData.exam.class.section}
+                Class: {examClassLabel}
                 &nbsp;&bull;&nbsp;
                 Academic Year: {printData.exam.academicYear.name}
               </p>

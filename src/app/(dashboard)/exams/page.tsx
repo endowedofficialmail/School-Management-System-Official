@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { format } from 'date-fns'
-import { Plus, FileEdit, Trash2, ClipboardList, BarChart2, Calendar, CalendarDays } from 'lucide-react'
+import { Plus, FileEdit, Trash2, ClipboardList, BarChart2, Calendar, CalendarDays, IdCard } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -36,9 +36,33 @@ import { buttonVariants } from '@/components/ui/button'
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-const EMPTY_FORM = { name: '', classId: '', startDate: '', endDate: '' }
+const EMPTY_FORM = { name: '', startDate: '', endDate: '' }
 
 type AcademicYear = { id: number; name: string; isActive: boolean }
+
+function classShortLabel(c: { name: string; section: string }) {
+  return `${c.name}-${c.section}`
+}
+
+function formatExamClassesDisplay(
+  exam: ExamWithDetails,
+  totalClassCount: number,
+): { text: string; isAll: boolean } {
+  const linked = exam.examClasses?.length
+    ? exam.examClasses.map((ec) => ec.class)
+    : exam.class
+      ? [exam.class]
+      : []
+
+  if (linked.length === 0) return { text: '—', isAll: false }
+  if (totalClassCount > 0 && linked.length >= totalClassCount) {
+    return { text: 'All Classes', isAll: true }
+  }
+  const names = linked.map(classShortLabel)
+  if (names.length === 1) return { text: `${linked[0].name} – ${linked[0].section}`, isAll: false }
+  if (names.length <= 3) return { text: names.join(', '), isAll: false }
+  return { text: `${names.slice(0, 2).join(', ')} + ${names.length - 2} more`, isAll: false }
+}
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -62,6 +86,8 @@ function ExamsPageInner() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editExam, setEditExam] = useState<ExamWithDetails | null>(null)
   const [form, setForm] = useState(EMPTY_FORM)
+  const [selectedClassIds, setSelectedClassIds] = useState<Set<number>>(new Set())
+  const [classError, setClassError] = useState('')
   const [saving, setSaving] = useState(false)
 
   // Delete confirmation
@@ -94,6 +120,8 @@ function ExamsPageInner() {
   function openCreate() {
     setEditExam(null)
     setForm(EMPTY_FORM)
+    setSelectedClassIds(new Set())
+    setClassError('')
     setDialogOpen(true)
   }
 
@@ -101,16 +129,44 @@ function ExamsPageInner() {
     setEditExam(exam)
     setForm({
       name: exam.name,
-      classId: String(exam.classId),
       startDate: format(new Date(exam.startDate), 'yyyy-MM-dd'),
       endDate: format(new Date(exam.endDate), 'yyyy-MM-dd'),
     })
+    const ids = exam.examClasses?.length
+      ? exam.examClasses.map((ec) => ec.classId)
+      : exam.classId
+        ? [exam.classId]
+        : []
+    setSelectedClassIds(new Set(ids))
+    setClassError('')
     setDialogOpen(true)
   }
 
+  function toggleClass(id: number) {
+    setSelectedClassIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+    setClassError('')
+  }
+
+  function toggleAllClasses(checked: boolean) {
+    if (checked) setSelectedClassIds(new Set(classes.map((c) => c.id)))
+    else setSelectedClassIds(new Set())
+    setClassError('')
+  }
+
+  const allClassesSelected = classes.length > 0 && selectedClassIds.size === classes.length
+
   async function handleSave() {
-    if (!form.name.trim() || !form.classId || !form.startDate || !form.endDate) {
+    if (!form.name.trim() || !form.startDate || !form.endDate) {
       toast.error('Please fill all required fields')
+      return
+    }
+    if (selectedClassIds.size === 0) {
+      setClassError('Select at least one class')
       return
     }
     if (new Date(form.endDate) < new Date(form.startDate)) {
@@ -123,9 +179,10 @@ function ExamsPageInner() {
     }
     setSaving(true)
     try {
+      const classIds = Array.from(selectedClassIds)
       const payload = {
         name: form.name.trim(),
-        classId: Number(form.classId),
+        classIds,
         academicYearId: activeYearId,
         startDate: new Date(form.startDate),
         endDate: new Date(form.endDate),
@@ -229,6 +286,7 @@ function ExamsPageInner() {
               <TableHead className="font-semibold">End Date</TableHead>
               <TableHead className="font-semibold">Academic Year</TableHead>
               <TableHead className="font-semibold">Datesheet</TableHead>
+              <TableHead className="font-semibold">Roll Slips</TableHead>
               <TableHead className="text-right font-semibold">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -236,7 +294,7 @@ function ExamsPageInner() {
             {loading ? (
               Array.from({ length: 4 }).map((_, i) => (
                 <TableRow key={i}>
-                  {Array.from({ length: 7 }).map((_, j) => (
+                  {Array.from({ length: 8 }).map((_, j) => (
                     <TableCell key={j}>
                       <div className="h-4 bg-slate-100 rounded animate-pulse w-24" />
                     </TableCell>
@@ -245,7 +303,7 @@ function ExamsPageInner() {
               ))
             ) : exams.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="py-16 text-center">
+                <TableCell colSpan={8} className="py-16 text-center">
                   <div className="flex flex-col items-center gap-2">
                     <Calendar className="h-10 w-10 text-slate-300" />
                     <p className="text-sm font-medium text-slate-500">No exams found</p>
@@ -256,11 +314,19 @@ function ExamsPageInner() {
                 </TableCell>
               </TableRow>
             ) : (
-              exams.map((exam) => (
+              exams.map((exam) => {
+                const classDisplay = formatExamClassesDisplay(exam, classes.length)
+                return (
                 <TableRow key={exam.id} className="hover:bg-slate-50/50">
                   <TableCell className="font-medium text-slate-900">{exam.name}</TableCell>
                   <TableCell className="text-slate-600">
-                    {exam.class.name} – {exam.class.section}
+                    {classDisplay.isAll ? (
+                      <Badge className="bg-indigo-100 text-indigo-700 hover:bg-indigo-100 text-xs">
+                        All Classes
+                      </Badge>
+                    ) : (
+                      classDisplay.text
+                    )}
                   </TableCell>
                   <TableCell className="text-slate-600">
                     {format(new Date(exam.startDate), 'dd MMM yyyy')}
@@ -292,6 +358,20 @@ function ExamsPageInner() {
                       {exam._count.datesheetEntries > 0 ? 'Datesheet Ready' : 'No Datesheet'}
                     </Badge>
                   </TableCell>
+                  <TableCell>
+                    <Badge
+                      className={cn(
+                        'text-xs',
+                        exam._count.rollNumberSlips > 0
+                          ? 'bg-green-100 text-green-700 hover:bg-green-100'
+                          : 'bg-slate-100 text-slate-500 hover:bg-slate-100'
+                      )}
+                    >
+                      {exam._count.rollNumberSlips > 0
+                        ? `${exam._count.rollNumberSlips} Slips Issued`
+                        : 'No Slips'}
+                    </Badge>
+                  </TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>
                       <DropdownMenuTrigger
@@ -303,6 +383,14 @@ function ExamsPageInner() {
                         Actions
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-48">
+                        <DropdownMenuItem
+                          className="flex items-center gap-2 cursor-pointer"
+                          onClick={() => { window.location.href = `/exams/${exam.id}/rollslips` }}
+                        >
+                          <IdCard className="h-4 w-4" />
+                          Roll No Slips
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
                         <DropdownMenuItem
                           className="flex items-center gap-2 cursor-pointer"
                           onClick={() => { window.location.href = `/exams/${exam.id}/datesheet` }}
@@ -344,7 +432,8 @@ function ExamsPageInner() {
                     </DropdownMenu>
                   </TableCell>
                 </TableRow>
-              ))
+                )
+              })
             )}
           </TableBody>
         </Table>
@@ -352,7 +441,7 @@ function ExamsPageInner() {
 
       {/* Create / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{editExam ? 'Edit Exam' : 'Create Exam'}</DialogTitle>
           </DialogHeader>
@@ -368,23 +457,36 @@ function ExamsPageInner() {
               />
             </div>
 
-            <div className="space-y-1.5">
-              <Label>Class *</Label>
-              <Select
-                value={form.classId}
-                onValueChange={(v) => setForm((f) => ({ ...f, classId: v ?? '' }))}
-              >
-                <SelectTrigger className="w-full h-9">
-                  <SelectValue placeholder="Select class..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {classes.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>
-                      {c.name} – {c.section}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Classes *</Label>
+                <span className="text-xs text-muted-foreground">
+                  {selectedClassIds.size} class{selectedClassIds.size !== 1 ? 'es' : ''} selected
+                </span>
+              </div>
+              <label className="flex items-center gap-2 text-sm font-medium cursor-pointer pb-1 border-b">
+                <input
+                  type="checkbox"
+                  checked={allClassesSelected}
+                  onChange={(e) => toggleAllClasses(e.target.checked)}
+                  className="rounded"
+                />
+                Select All Classes
+              </label>
+              <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto border rounded-md p-3">
+                {classes.map((c) => (
+                  <label key={c.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedClassIds.has(c.id)}
+                      onChange={() => toggleClass(c.id)}
+                      className="rounded"
+                    />
+                    {c.name} – {c.section}
+                  </label>
+                ))}
+              </div>
+              {classError && <p className="text-xs text-red-600">{classError}</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-3">

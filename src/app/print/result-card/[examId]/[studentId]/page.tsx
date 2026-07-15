@@ -16,7 +16,7 @@ const GRADE_SCALE = [
 ]
 
 function ResultCardBody({ data }: { data: StudentFullResult }) {
-  const { exam, student, school, results, totalObtained, totalPossible, percentage, overallGrade, passed, rank, totalRanked, subjectsPassed, subjectsFailed } = data
+  const { exam, student, school, classLabel, results, totalObtained, totalPossible, percentage, overallGrade, passed, rank, totalRanked, subjectsPassed, subjectsFailed } = data
   if (!school?.name) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', color: '#b45309' }}>⚠️ School name not configured. Please update school profile before printing.</div>
   }
@@ -61,7 +61,7 @@ function ResultCardBody({ data }: { data: StudentFullResult }) {
           ['Date of Birth', student.dateOfBirth ? format(new Date(student.dateOfBirth), 'dd MMM yyyy') : 'N/A'],
           ['Registration #', student.registrationNumber],
           ['Gender', student.gender === 'MALE' ? 'Male' : 'Female'],
-          ['Class', `${exam.class.name} – ${exam.class.section}`],
+          ['Class', classLabel],
           ['Admission Date', format(new Date(student.admissionDate), 'dd MMM yyyy')],
           ['Guardian Name', student.guardianName],
           ['Date of Issue', format(new Date(), 'dd MMM yyyy')],

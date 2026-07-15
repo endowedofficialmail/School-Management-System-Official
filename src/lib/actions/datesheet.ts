@@ -32,6 +32,7 @@ export async function getDatesheetForPrint(examId: number) {
       include: {
         class: true,
         academicYear: true,
+        examClasses: { include: { class: true } },
         datesheetEntries: {
           include: { subject: { select: { id: true, name: true } } },
           orderBy: [{ date: 'asc' }, { startTime: 'asc' }],

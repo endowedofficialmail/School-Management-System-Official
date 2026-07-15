@@ -72,16 +72,35 @@ export async function deleteSubject(id: number) {
 
 // ─── Exams ────────────────────────────────────────────────────────────────────
 
+export async function getExamClassIds(examId: number): Promise<number[]> {
+  const exam = await prisma.exam.findUnique({
+    where: { id: examId },
+    include: { examClasses: { select: { classId: true } } },
+  })
+  if (!exam) return []
+  if (exam.examClasses.length > 0) return exam.examClasses.map((ec) => ec.classId)
+  if (exam.classId) return [exam.classId]
+  return []
+}
+
 export async function getExams(filters?: { classId?: number; academicYearId?: number }) {
   return prisma.exam.findMany({
     where: {
-      ...(filters?.classId ? { classId: filters.classId } : {}),
+      ...(filters?.classId
+        ? {
+            OR: [
+              { classId: filters.classId },
+              { examClasses: { some: { classId: filters.classId } } },
+            ],
+          }
+        : {}),
       ...(filters?.academicYearId ? { academicYearId: filters.academicYearId } : {}),
     },
     include: {
       class: true,
       academicYear: true,
-      _count: { select: { datesheetEntries: true } },
+      examClasses: { include: { class: true } },
+      _count: { select: { datesheetEntries: true, rollNumberSlips: true } },
     },
     orderBy: { startDate: 'desc' },
   })
@@ -90,29 +109,95 @@ export async function getExams(filters?: { classId?: number; academicYearId?: nu
 export async function getExamById(id: number) {
   return prisma.exam.findUnique({
     where: { id },
-    include: { class: true, academicYear: true },
+    include: {
+      class: true,
+      academicYear: true,
+      examClasses: { include: { class: true } },
+    },
+  })
+}
+
+export async function getExamClasses(examId: number) {
+  return prisma.examClass.findMany({
+    where: { examId },
+    include: { class: { select: { id: true, name: true, section: true } } },
+    orderBy: [{ class: { name: 'asc' } }, { class: { section: 'asc' } }],
   })
 }
 
 export async function createExam(data: {
   name: string
-  classId: number
+  classIds: number[]
   academicYearId: number
   startDate: Date
   endDate: Date
 }) {
-  await prisma.exam.create({ data })
+  const exam = await prisma.exam.create({
+    data: {
+      name: data.name,
+      classId: data.classIds[0] || null,
+      academicYearId: data.academicYearId,
+      startDate: data.startDate,
+      endDate: data.endDate,
+    },
+  })
+
+  if (data.classIds.length > 0) {
+    await prisma.examClass.createMany({
+      data: data.classIds.map((classId) => ({
+        examId: exam.id,
+        classId,
+      })),
+    })
+  }
+
   revalidatePath('/exams')
+  return exam
 }
 
-export async function updateExam(id: number, data: { name?: string; classId?: number; startDate?: Date; endDate?: Date }) {
-  await prisma.exam.update({ where: { id }, data })
+export async function updateExam(
+  id: number,
+  data: {
+    name?: string
+    classIds?: number[]
+    startDate?: Date
+    endDate?: Date
+  }
+) {
+  const updateData: {
+    name?: string
+    classId?: number | null
+    startDate?: Date
+    endDate?: Date
+  } = {}
+
+  if (data.name !== undefined) updateData.name = data.name
+  if (data.startDate !== undefined) updateData.startDate = data.startDate
+  if (data.endDate !== undefined) updateData.endDate = data.endDate
+  if (data.classIds !== undefined) {
+    updateData.classId = data.classIds[0] || null
+    await prisma.examClass.deleteMany({ where: { examId: id } })
+    if (data.classIds.length > 0) {
+      await prisma.examClass.createMany({
+        data: data.classIds.map((classId) => ({
+          examId: id,
+          classId,
+        })),
+      })
+    }
+  }
+
+  const exam = await prisma.exam.update({ where: { id }, data: updateData })
   revalidatePath('/exams')
+  return exam
 }
 
 export async function deleteExam(id: number) {
   await prisma.result.deleteMany({ where: { examId: id } })
   await prisma.examPerformance.deleteMany({ where: { examId: id } })
+  await prisma.rollNumberSlip.deleteMany({ where: { examId: id } })
+  await prisma.examClass.deleteMany({ where: { examId: id } })
+  await prisma.datesheetEntry.deleteMany({ where: { examId: id } })
   await prisma.exam.delete({ where: { id } })
   revalidatePath('/exams')
 }
@@ -120,12 +205,12 @@ export async function deleteExam(id: number) {
 // ─── Results — Read ───────────────────────────────────────────────────────────
 
 export async function getResultsForExamAndSubject(examId: number, subjectId: number) {
-  const exam = await prisma.exam.findUnique({ where: { id: examId }, select: { classId: true } })
-  if (!exam) return []
+  const classIds = await getExamClassIds(examId)
+  if (classIds.length === 0) return []
 
   const [students, existing] = await Promise.all([
     prisma.student.findMany({
-      where: { classId: exam.classId, status: 'ACTIVE' },
+      where: { classId: { in: classIds }, status: 'ACTIVE' },
       orderBy: { firstName: 'asc' },
     }),
     prisma.result.findMany({ where: { examId, subjectId } }),
@@ -190,12 +275,12 @@ export async function saveResults(data: {
 // ─── ExamPerformance Recalculation ────────────────────────────────────────────
 
 async function recalcExamPerformance(examId: number) {
-  const exam = await prisma.exam.findUnique({ where: { id: examId }, select: { classId: true } })
-  if (!exam) return
+  const classIds = await getExamClassIds(examId)
+  if (classIds.length === 0) return
 
   const [students, allResults] = await Promise.all([
     prisma.student.findMany({
-      where: { classId: exam.classId, status: 'ACTIVE' },
+      where: { classId: { in: classIds }, status: 'ACTIVE' },
       select: { id: true },
     }),
     prisma.result.findMany({ where: { examId } }),
@@ -252,7 +337,11 @@ async function recalcExamPerformance(examId: number) {
 export async function getClassResultSummary(examId: number) {
   const exam = await prisma.exam.findUnique({
     where: { id: examId },
-    include: { class: { include: { subjects: true } }, academicYear: true },
+    include: {
+      class: { include: { subjects: true } },
+      academicYear: true,
+      examClasses: { include: { class: true } },
+    },
   })
   if (!exam) return null
 
@@ -316,8 +405,14 @@ export async function getClassResultSummary(examId: number) {
 
 export async function getStudentFullResult(examId: number, studentId: number) {
   const [exam, student, results, school] = await Promise.all([
-    prisma.exam.findUnique({ where: { id: examId }, include: { class: true, academicYear: true } }),
-    prisma.student.findUnique({ where: { id: studentId } }),
+    prisma.exam.findUnique({
+      where: { id: examId },
+      include: { class: true, academicYear: true, examClasses: { include: { class: true } } },
+    }),
+    prisma.student.findUnique({
+      where: { id: studentId },
+      include: { class: true },
+    }),
     prisma.result.findMany({
       where: { examId, studentId },
       include: { subject: true },
@@ -328,6 +423,8 @@ export async function getStudentFullResult(examId: number, studentId: number) {
 
   if (!exam || !student) return null
 
+  const displayClass = student.class ?? exam.class
+
   // Get or calculate performance
   const performance = await prisma.examPerformance.findUnique({
     where: { examId_studentId: { examId, studentId } },
@@ -335,6 +432,10 @@ export async function getStudentFullResult(examId: number, studentId: number) {
 
   const totalObtained = results.reduce((s, r) => s + Number(r.marksObtained), 0)
   const totalPossible = results.reduce((s, r) => s + Number(r.totalMarks), 0)
+
+  const classLabel = displayClass
+    ? `${displayClass.name} – ${displayClass.section}`
+    : '—'
 
   if (!performance && totalPossible > 0) {
     const pct = (totalObtained / totalPossible) * 100
@@ -344,7 +445,7 @@ export async function getStudentFullResult(examId: number, studentId: number) {
     const totalRanked = allPerf.length + 1
     const rank = allPerf.filter((p) => Number(p.percentage) > pct).length + 1
     return {
-      exam, student, school, results: results.map((r) => ({
+      exam, student, school, classLabel, results: results.map((r) => ({
         subject: r.subject, marksObtained: Number(r.marksObtained),
         totalMarks: Number(r.totalMarks),
         grade: r.grade ?? calculateGrade(Number(r.marksObtained), Number(r.totalMarks)),
@@ -367,7 +468,7 @@ export async function getStudentFullResult(examId: number, studentId: number) {
   const perfPassed = performance?.isPassed ?? false
 
   return {
-    exam, student, school,
+    exam, student, school, classLabel,
     results: results.map((r) => ({
       subject: r.subject,
       marksObtained: Number(r.marksObtained),
@@ -393,21 +494,37 @@ export async function getStudentResultHistory(studentId: number) {
   const perfs = await prisma.examPerformance.findMany({
     where: { studentId },
     include: {
-      exam: { include: { class: true, academicYear: true } },
+      exam: {
+        include: {
+          class: true,
+          academicYear: true,
+          examClasses: { include: { class: true } },
+        },
+      },
     },
     orderBy: { exam: { startDate: 'desc' } },
   })
-  return perfs.map((p) => ({
-    id: p.id,
-    examId: p.examId,
-    examName: p.exam.name,
-    className: `${p.exam.class.name} – ${p.exam.class.section}`,
-    academicYear: p.exam.academicYear.name,
-    percentage: Number(p.percentage),
-    grade: p.grade,
-    rank: p.rank,
-    isPassed: p.isPassed,
-  }))
+  return perfs.map((p) => {
+    const classes = p.exam.examClasses.length > 0
+      ? p.exam.examClasses.map((ec) => ec.class)
+      : p.exam.class
+        ? [p.exam.class]
+        : []
+    const className = classes.length > 0
+      ? `${classes[0].name} – ${classes[0].section}`
+      : '—'
+    return {
+      id: p.id,
+      examId: p.examId,
+      examName: p.exam.name,
+      className,
+      academicYear: p.exam.academicYear.name,
+      percentage: Number(p.percentage),
+      grade: p.grade,
+      rank: p.rank,
+      isPassed: p.isPassed,
+    }
+  })
 }
 
 // ─── Subject-wise Analysis ────────────────────────────────────────────────────
@@ -464,13 +581,19 @@ export async function getStudentResultCard(examId: number, studentId: number) {
 export async function getExamSummaryReport(examId: number) {
   const exam = await prisma.exam.findUnique({
     where: { id: examId },
-    include: { class: true, academicYear: true },
+    include: { class: true, academicYear: true, examClasses: { include: { class: true } } },
   })
   if (!exam) return null
 
+  const classIds = exam.examClasses.length > 0
+    ? exam.examClasses.map((ec) => ec.classId)
+    : exam.classId
+      ? [exam.classId]
+      : []
+
   const [students, results, school] = await Promise.all([
     prisma.student.findMany({
-      where: { classId: exam.classId, status: 'ACTIVE' },
+      where: { classId: { in: classIds }, status: 'ACTIVE' },
       orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     }),
     prisma.result.findMany({ where: { examId } }),

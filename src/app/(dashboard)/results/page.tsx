@@ -16,7 +16,7 @@ import {
 
 import BackButton from '@/components/shared/BackButton'
 import { GRADE_COLORS } from '@/lib/grade'
-import { getExams, getClassResultSummary, type ClassSummaryData } from '@/lib/actions/exams'
+import { getExams, getClassResultSummary, type ClassSummaryData, type ExamWithDetails } from '@/lib/actions/exams'
 
 function RankBadge({ rank }: { rank: number | null }) {
   if (rank === 1) return <Trophy className="h-4 w-4 text-yellow-500" />
@@ -25,11 +25,9 @@ function RankBadge({ rank }: { rank: number | null }) {
   return <span className="text-slate-600 text-sm">{rank ?? '—'}</span>
 }
 
-type ExamItem = { id: number; name: string; class: { name: string; section: string }; academicYear: { name: string; isActive: boolean } }
-
 function ResultsHubInner() {
   const searchParams = useSearchParams()
-  const [exams, setExams] = useState<ExamItem[]>([])
+  const [exams, setExams] = useState<ExamWithDetails[]>([])
   const [selectedExamId, setSelectedExamId] = useState(() => searchParams?.get('examId') ?? '')
   const [summary, setSummary] = useState<ClassSummaryData | null>(null)
   const [loadingExams, setLoadingExams] = useState(true)
@@ -102,7 +100,11 @@ function ResultsHubInner() {
             <SelectContent>
               {exams.map((e) => (
                 <SelectItem key={e.id} value={String(e.id)}>
-                  {e.name} — {e.class.name} {e.class.section}
+                  {e.name} — {e.examClasses?.length
+                    ? e.examClasses.map((ec) => `${ec.class.name} ${ec.class.section}`).join(', ')
+                    : e.class
+                      ? `${e.class.name} ${e.class.section}`
+                      : '—'}
                 </SelectItem>
               ))}
             </SelectContent>

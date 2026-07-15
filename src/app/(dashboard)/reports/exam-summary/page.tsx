@@ -72,7 +72,11 @@ export default function ExamSummaryPage() {
       {report && (
         <div className="hidden print:block mb-6">
           <h1 className="text-2xl font-bold">Exam Results Summary</h1>
-          <p className="font-medium">{report.exam.name} — {report.exam.class.name} {report.exam.class.section}</p>
+          <p className="font-medium">{report.exam.name} — {report.exam.examClasses?.length
+            ? report.exam.examClasses.map((ec) => `${ec.class.name} ${ec.class.section}`).join(', ')
+            : report.exam.class
+              ? `${report.exam.class.name} ${report.exam.class.section}`
+              : '—'}</p>
           <p className="text-muted-foreground">Generated on {new Date().toLocaleDateString()}</p>
         </div>
       )}
@@ -93,7 +97,11 @@ export default function ExamSummaryPage() {
               ) : (
                 exams.map((e) => (
                   <SelectItem key={e.id} value={String(e.id)}>
-                    {e.name} — {e.class.name} {e.class.section}
+                    {e.name} — {e.examClasses?.length
+                      ? e.examClasses.map((ec) => `${ec.class.name} ${ec.class.section}`).join(', ')
+                      : e.class
+                        ? `${e.class.name} ${e.class.section}`
+                        : '—'}
                   </SelectItem>
                 ))
               )}
@@ -124,7 +132,11 @@ export default function ExamSummaryPage() {
             <h2 className="text-lg font-bold text-slate-800">
               {report.exam.name} —{' '}
               <span className="text-primary">
-                {report.exam.class.name} {report.exam.class.section}
+                {report.exam.examClasses?.length
+                  ? report.exam.examClasses.map((ec) => `${ec.class.name} ${ec.class.section}`).join(', ')
+                  : report.exam.class
+                    ? `${report.exam.class.name} ${report.exam.class.section}`
+                    : '—'}
               </span>
             </h2>
             <p className="text-sm text-muted-foreground">{report.exam.academicYear.name}</p>

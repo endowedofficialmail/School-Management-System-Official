@@ -80,7 +80,15 @@ function ResultsPageInner() {
       const e = await getExamById(examId)
       setExam(e)
       if (e) {
-        const subs = await getSubjectsByClass(e.classId)
+        const classIds = e.examClasses?.length
+          ? e.examClasses.map((ec) => ec.classId)
+          : e.classId
+            ? [e.classId]
+            : []
+        const allSubs = await Promise.all(classIds.map((cid) => getSubjectsByClass(cid)))
+        const merged = new Map<number, (typeof allSubs)[0][number]>()
+        allSubs.flat().forEach((s) => merged.set(s.id, s))
+        const subs = Array.from(merged.values())
         setSubjects(subs)
         // Determine which subjects have saved results
         const results = await Promise.all(
@@ -232,7 +240,11 @@ function ResultsPageInner() {
           <div>
             <h1 className="text-xl font-bold tracking-tight">{exam.name}</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              {exam.class.name} – {exam.class.section} &nbsp;·&nbsp; {exam.academicYear.name}
+              {(exam.examClasses?.length
+                ? exam.examClasses.map((ec) => `${ec.class.name} – ${ec.class.section}`).join(', ')
+                : exam.class
+                  ? `${exam.class.name} – ${exam.class.section}`
+                  : '—')} &nbsp;·&nbsp; {exam.academicYear.name}
             </p>
           </div>
         </div>

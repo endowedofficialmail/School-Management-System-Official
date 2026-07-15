@@ -77,6 +77,7 @@ model User {
   parentProfile     Parent?
   issuedCertificates Certificate[] @relation("issuedCertificates")
   promotionRecords  PromotionRecord[]
+  issuedRollSlips   RollNumberSlip[]
 }
 
 model School {
@@ -123,6 +124,7 @@ model Class {
   timetableEntries TimetableEntry[]
   promotionsFrom PromotionRecord[] @relation("PromotionFromClass")
   promotionsTo   PromotionRecord[] @relation("PromotionToClass")
+  examClasses    ExamClass[]
 
   @@unique([name, section, academicYearId])
 }
@@ -157,6 +159,7 @@ model Student {
   certificates       Certificate[]
   advanceLogs        AdvanceBalanceLog[]
   promotionRecords   PromotionRecord[]
+  rollNumberSlips    RollNumberSlip[]
 
   @@index([classId])
   @@index([status])
@@ -267,8 +270,8 @@ model Attendance {
 model Exam {
   id             Int          @id @default(autoincrement())
   name           String
-  class          Class        @relation(fields: [classId], references: [id])
-  classId        Int
+  class          Class?       @relation(fields: [classId], references: [id])
+  classId        Int?
   academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
   academicYearId Int
   startDate      DateTime
@@ -278,6 +281,38 @@ model Exam {
   results           Result[]
   datesheetEntries  DatesheetEntry[]
   performances      ExamPerformance[]
+  examClasses       ExamClass[]
+  rollNumberSlips   RollNumberSlip[]
+}
+
+model ExamClass {
+  id        Int      @id @default(autoincrement())
+  exam      Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  examId    Int
+  class     Class    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  classId   Int
+  createdAt DateTime @default(now())
+
+  @@unique([examId, classId])
+}
+
+model RollNumberSlip {
+  id           Int      @id @default(autoincrement())
+  rollNumber   String   @unique
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId    Int
+  exam         Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  examId       Int
+  issuedBy     User     @relation(fields: [issuedById], references: [id])
+  issuedById   Int
+  issuedAt     DateTime @default(now())
+  venue        String?
+  instructions String?
+  isValid      Boolean  @default(true)
+
+  @@unique([studentId, examId])
+  @@index([examId])
+  @@index([studentId])
 }
 
 model Result {

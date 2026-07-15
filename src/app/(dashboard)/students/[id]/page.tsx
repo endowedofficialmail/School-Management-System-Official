@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { format } from 'date-fns'
-import { ArrowLeft, Pencil, Award } from 'lucide-react'
+import { ArrowLeft, Pencil, Award, IdCard } from 'lucide-react'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { UserRole } from '@/types'
@@ -17,6 +17,7 @@ import StudentFeeHistoryTab from './StudentFeeHistoryTab'
 import AttendanceCalendar from '@/components/portal/AttendanceCalendar'
 import Breadcrumb from '@/components/shared/Breadcrumb'
 import StudentCertificatesTab from '@/components/certificates/StudentCertificatesTab'
+import StudentRollSlipsTab from '@/components/rollslips/StudentRollSlipsTab'
 import { getStudentPromotionHistory } from '@/lib/actions/promotions'
 
 const statusConfig = {
@@ -119,6 +120,10 @@ export default async function StudentDetailPage({
           <TabsTrigger value="certificates">
             <Award className="h-3.5 w-3.5 mr-1" />
             Certificates
+          </TabsTrigger>
+          <TabsTrigger value="rollslips">
+            <IdCard className="h-3.5 w-3.5 mr-1" />
+            Roll Slips
           </TabsTrigger>
         </TabsList>
 
@@ -239,6 +244,10 @@ export default async function StudentDetailPage({
           ) : (
             <p className="text-sm text-muted-foreground">Unable to load certificates.</p>
           )}
+        </TabsContent>
+
+        <TabsContent value="rollslips" className="pt-4">
+          <StudentRollSlipsTab studentId={id} />
         </TabsContent>
       </Tabs>
     </div>

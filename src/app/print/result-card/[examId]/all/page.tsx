@@ -16,7 +16,7 @@ const GRADE_SCALE = [
 ]
 
 function SingleCard({ data }: { data: StudentFullResult }) {
-  const { exam, student, school, results, totalObtained, totalPossible, percentage, overallGrade, passed, rank, totalRanked, subjectsPassed, subjectsFailed } = data
+  const { exam, student, school, classLabel, results, totalObtained, totalPossible, percentage, overallGrade, passed, rank, totalRanked, subjectsPassed, subjectsFailed } = data
   if (!school?.name) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', color: '#b45309' }}>⚠️ School name not configured. Please update school profile before printing.</div>
   }
@@ -52,7 +52,7 @@ function SingleCard({ data }: { data: StudentFullResult }) {
         {[
           ['Student Name', fullName], ['Date of Birth', student.dateOfBirth ? format(new Date(student.dateOfBirth), 'dd MMM yyyy') : 'N/A'],
           ['Registration #', student.registrationNumber], ['Gender', student.gender === 'MALE' ? 'Male' : 'Female'],
-          ['Class', `${exam.class.name} – ${exam.class.section}`], ['Date of Issue', format(new Date(), 'dd MMM yyyy')],
+          ['Class', classLabel], ['Date of Issue', format(new Date(), 'dd MMM yyyy')],
           ['Guardian Name', student.guardianName], ['', ''],
         ].map(([label, value], i) => (
           <div key={i} style={{ display: 'flex', gap: 4, padding: '3px 0', borderBottom: '1px dashed #e5e7eb' }}>
