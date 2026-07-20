@@ -12,11 +12,13 @@ import {
 
 export type ExamWithDetails = Awaited<ReturnType<typeof getExams>>[number]
 export type SubjectWithTeacher = Awaited<ReturnType<typeof getSubjectsByClass>>[number]
-export type ResultRow = Awaited<ReturnType<typeof getResultsForExamAndSubject>>[number]
-export type ClassSummaryData = NonNullable<Awaited<ReturnType<typeof getClassResultSummary>>>
-export type SubjectAnalysisData = NonNullable<Awaited<ReturnType<typeof getSubjectWiseResult>>>
 export type StudentFullResult = NonNullable<Awaited<ReturnType<typeof getStudentFullResult>>>
 export type StudentResultHistoryItem = Awaited<ReturnType<typeof getStudentResultHistory>>[number]
+export type AwardListData = NonNullable<Awaited<ReturnType<typeof getAwardList>>>
+export type AwardListRow = AwardListData['rows'][number]
+export type ClassResultData = NonNullable<Awaited<ReturnType<typeof getClassResult>>>
+export type ClassResultRow = ClassResultData['rows'][number]
+export type AwardListSummaryItem = Awaited<ReturnType<typeof getAwardListSummary>>[number]
 
 // ─── Academic Years ──────────────────────────────────────────────────────────
 
@@ -202,209 +204,395 @@ export async function deleteExam(id: number) {
   revalidatePath('/exams')
 }
 
-// ─── Results — Read ───────────────────────────────────────────────────────────
+// ─── Award List — the single data entry point ─────────────────────────────────
 
-export async function getResultsForExamAndSubject(examId: number, subjectId: number) {
-  const classIds = await getExamClassIds(examId)
-  if (classIds.length === 0) return []
-
-  const [students, existing] = await Promise.all([
+export async function getAwardList(examId: number, subjectId: number, classId: number) {
+  const [subject, students, results] = await Promise.all([
+    prisma.subject.findUnique({ where: { id: subjectId } }),
     prisma.student.findMany({
-      where: { classId: { in: classIds }, status: 'ACTIVE' },
-      orderBy: { firstName: 'asc' },
+      where: { classId, status: 'ACTIVE' },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     }),
     prisma.result.findMany({ where: { examId, subjectId } }),
   ])
+  if (!subject) return null
 
-  const resultMap = new Map(
-    existing.map((r) => [
-      r.studentId,
-      {
-        marksObtained: Number(r.marksObtained),
-        totalMarks: Number(r.totalMarks),
-        grade: r.grade,
-        remarks: r.remarks ?? '',
-      },
-    ])
-  )
+  const resultMap = new Map(results.map((r) => [r.studentId, r]))
 
-  return students.map((s) => {
-    const saved = resultMap.get(s.id) ?? null
+  const rows = students.map((s) => {
+    const r = resultMap.get(s.id)
     return {
       student: s,
-      marksObtained: saved?.marksObtained ?? null,
-      totalMarks: saved?.totalMarks ?? null,
-      grade: saved?.grade ?? null,
-      remarks: saved?.remarks ?? '',
+      theoryMarks: r?.theoryMarks !== null && r?.theoryMarks !== undefined ? Number(r.theoryMarks) : null,
+      practicalMarks: r?.practicalMarks !== null && r?.practicalMarks !== undefined ? Number(r.practicalMarks) : null,
+      marksObtained: r ? Number(r.marksObtained) : null,
+      totalMarks: r ? Number(r.totalMarks) : null,
+      grade: r?.grade ?? null,
+      isAbsent: r?.isAbsent ?? false,
+      isWithheld: r?.isWithheld ?? false,
+      remarks: r?.remarks ?? '',
     }
+  })
+
+  const enteredCount = rows.filter((r) => r.marksObtained !== null || r.isAbsent || r.isWithheld).length
+  const scoredRows = rows.filter((r) => r.marksObtained !== null && !r.isAbsent && !r.isWithheld && r.totalMarks)
+  const totalMarksHint = rows.find((r) => r.totalMarks !== null)?.totalMarks ?? null
+
+  const topper = scoredRows.length > 0
+    ? scoredRows.reduce((best, r) => (r.marksObtained! > best.marksObtained! ? r : best))
+    : null
+  const average = scoredRows.length > 0
+    ? Math.round((scoredRows.reduce((sum, r) => sum + r.marksObtained!, 0) / scoredRows.length) * 10) / 10
+    : 0
+  const passCount = scoredRows.filter((r) => (r.marksObtained! / r.totalMarks!) * 100 >= 40).length
+  const failCount = scoredRows.length - passCount
+
+  return {
+    subject,
+    rows,
+    totalStudents: students.length,
+    enteredCount,
+    totalMarksHint,
+    topper,
+    average,
+    passCount,
+    failCount,
+  }
+}
+
+export async function getAwardListSummary(examId: number, classId: number) {
+  const [subjects, totalStudents] = await Promise.all([
+    getSubjectsByClass(classId),
+    prisma.student.count({ where: { classId, status: 'ACTIVE' } }),
+  ])
+  if (subjects.length === 0) return []
+
+  const counts = await prisma.result.groupBy({
+    by: ['subjectId'],
+    where: { examId, subjectId: { in: subjects.map((s) => s.id) } },
+    _count: { _all: true },
+  })
+  const countMap = new Map(counts.map((c) => [c.subjectId, c._count._all]))
+
+  return subjects.map((s) => {
+    const entries = countMap.get(s.id) ?? 0
+    const status: 'complete' | 'partial' | 'none' =
+      entries === 0 ? 'none' : entries >= totalStudents ? 'complete' : 'partial'
+    return { subjectId: s.id, subjectName: s.name, entries, totalStudents, status }
   })
 }
 
-// ─── Results — Write (with ExamPerformance recalculation) ─────────────────────
+// ─── Results — Write (Award List is the single entry point) ───────────────────
 
 export async function saveResults(data: {
   examId: number
   subjectId: number
-  results: { studentId: number; marksObtained: number; totalMarks: number; remarks?: string }[]
+  results: {
+    studentId: number
+    marksObtained: number
+    totalMarks: number
+    theoryMarks?: number
+    practicalMarks?: number
+    isAbsent?: boolean
+    isWithheld?: boolean
+    remarks?: string
+  }[]
 }) {
-  for (const r of data.results) {
-    const grade = calculateGrade(r.marksObtained, r.totalMarks)
+  for (const result of data.results) {
+    const grade = result.isAbsent
+      ? 'ABS'
+      : result.isWithheld
+        ? 'W/H'
+        : calculateGrade(result.marksObtained, result.totalMarks)
+
     await prisma.result.upsert({
-      where: { examId_studentId_subjectId: { examId: data.examId, studentId: r.studentId, subjectId: data.subjectId } },
-      update: { marksObtained: r.marksObtained, totalMarks: r.totalMarks, grade, remarks: r.remarks ?? null },
+      where: {
+        examId_studentId_subjectId: {
+          examId: data.examId,
+          studentId: result.studentId,
+          subjectId: data.subjectId,
+        },
+      },
+      update: {
+        marksObtained: result.marksObtained,
+        totalMarks: result.totalMarks,
+        theoryMarks: result.theoryMarks,
+        practicalMarks: result.practicalMarks,
+        isAbsent: result.isAbsent || false,
+        isWithheld: result.isWithheld || false,
+        grade,
+        remarks: result.remarks,
+      },
       create: {
         examId: data.examId,
-        studentId: r.studentId,
+        studentId: result.studentId,
         subjectId: data.subjectId,
-        marksObtained: r.marksObtained,
-        totalMarks: r.totalMarks,
+        marksObtained: result.marksObtained,
+        totalMarks: result.totalMarks,
+        theoryMarks: result.theoryMarks,
+        practicalMarks: result.practicalMarks,
+        isAbsent: result.isAbsent || false,
+        isWithheld: result.isWithheld || false,
         grade,
-        remarks: r.remarks ?? null,
+        remarks: result.remarks,
       },
     })
   }
 
-  // Recalculate ExamPerformance for all students in the class
-  await recalcExamPerformance(data.examId)
+  // Auto-calculate Class Result + DMC data for every student in the exam
+  await recalculateExamPerformance(data.examId)
 
   revalidatePath('/exams')
   revalidatePath('/results')
   return data.results.length
 }
 
-// ─── ExamPerformance Recalculation ────────────────────────────────────────────
+// ─── ExamPerformance Recalculation — everything flows from here ───────────────
 
-async function recalcExamPerformance(examId: number) {
-  const classIds = await getExamClassIds(examId)
+async function recalculateExamPerformance(examId: number) {
+  const exam = await prisma.exam.findUnique({
+    where: { id: examId },
+    include: { examClasses: true },
+  })
+  if (!exam) return
+
+  const classIds = exam.examClasses.length > 0
+    ? exam.examClasses.map((ec) => ec.classId)
+    : exam.classId
+      ? [exam.classId]
+      : []
   if (classIds.length === 0) return
 
-  const [students, allResults] = await Promise.all([
-    prisma.student.findMany({
-      where: { classId: { in: classIds }, status: 'ACTIVE' },
-      select: { id: true },
-    }),
-    prisma.result.findMany({ where: { examId } }),
-  ])
+  const students = await prisma.student.findMany({
+    where: { classId: { in: classIds }, status: 'ACTIVE' },
+    select: { id: true },
+  })
+  if (students.length === 0) return
 
-  // Build totals per student
-  const totals = new Map<number, { obtained: number; possible: number }>(
-    students.map((s) => [s.id, { obtained: 0, possible: 0 }])
-  )
-  allResults.forEach((r) => {
-    const t = totals.get(r.studentId)
-    if (t) { t.obtained += Number(r.marksObtained); t.possible += Number(r.totalMarks) }
+  const allResults = await prisma.result.findMany({
+    where: { examId, studentId: { in: students.map((s) => s.id) } },
   })
 
-  // Sort by percentage to assign ranks
-  const ranked = Array.from(totals.entries())
-    .filter(([, d]) => d.possible > 0)
-    .map(([id, d]) => ({ id, pct: (d.obtained / d.possible) * 100 }))
-    .sort((a, b) => b.pct - a.pct)
-  const rankMap = new Map(ranked.map((r, i) => [r.id, i + 1]))
+  const resultsByStudent = new Map<number, typeof allResults>()
+  allResults.forEach((r) => {
+    if (!resultsByStudent.has(r.studentId)) resultsByStudent.set(r.studentId, [])
+    resultsByStudent.get(r.studentId)!.push(r)
+  })
 
-  // Upsert ExamPerformance for each student
-  for (const entry of Array.from(totals.entries())) {
-    const [studentId, t] = entry
-    if (t.possible === 0) continue
-    const pct = (t.obtained / t.possible) * 100
-    const grade = calculateGrade(t.obtained, t.possible)
+  type Perf = {
+    studentId: number
+    totalObtained: number
+    totalPossible: number
+    percentage: number
+    subjectsPassed: number
+    subjectsFailed: number
+    totalSubjects: number
+    hasAbsent: boolean
+    resultStatus: string
+    grade: string
+    isPassed: boolean
+    rank: number
+  }
+
+  const performances: Omit<Perf, 'rank'>[] = []
+
+  for (const student of students) {
+    const results = resultsByStudent.get(student.id) ?? []
+    if (results.length === 0) continue
+
+    const totalObtained = results
+      .filter((r) => !r.isAbsent && !r.isWithheld)
+      .reduce((sum, r) => sum + Number(r.marksObtained), 0)
+
+    const totalPossible = results.reduce((sum, r) => sum + Number(r.totalMarks), 0)
+
+    const percentage = totalPossible > 0
+      ? Number(((totalObtained / totalPossible) * 100).toFixed(2))
+      : 0
+
+    const subjectsPassed = results.filter((r) =>
+      !r.isAbsent && !r.isWithheld && Number(r.totalMarks) > 0 &&
+      (Number(r.marksObtained) / Number(r.totalMarks)) * 100 >= 40
+    ).length
+
+    const subjectsFailed = results.filter((r) =>
+      !r.isAbsent && !r.isWithheld && Number(r.totalMarks) > 0 &&
+      (Number(r.marksObtained) / Number(r.totalMarks)) * 100 < 40
+    ).length
+
+    const hasAbsent = results.some((r) => r.isAbsent)
+    const hasWithheld = results.some((r) => r.isWithheld)
+
+    let resultStatus = 'Pass'
+    if (hasWithheld) resultStatus = 'Withheld'
+    else if (hasAbsent) resultStatus = 'Absent'
+    else if (subjectsFailed > 0) resultStatus = 'Fail'
+
+    const grade = calculateGrade(totalObtained, totalPossible)
+
+    performances.push({
+      studentId: student.id,
+      totalObtained,
+      totalPossible,
+      percentage,
+      subjectsPassed,
+      subjectsFailed,
+      totalSubjects: results.length,
+      hasAbsent,
+      resultStatus,
+      grade,
+      isPassed: resultStatus === 'Pass',
+    })
+  }
+
+  // Sort by percentage descending to assign ranks (ties share the same rank)
+  performances.sort((a, b) => b.percentage - a.percentage)
+  const ranked: Perf[] = []
+  let rank = 1
+  for (let i = 0; i < performances.length; i++) {
+    if (i > 0 && performances[i].percentage < performances[i - 1].percentage) {
+      rank = i + 1
+    }
+    ranked.push({ ...performances[i], rank })
+  }
+
+  for (const perf of ranked) {
     await prisma.examPerformance.upsert({
-      where: { examId_studentId: { examId, studentId } },
+      where: { examId_studentId: { examId, studentId: perf.studentId } },
+      update: {
+        totalMarksObtained: perf.totalObtained,
+        totalPossibleMarks: perf.totalPossible,
+        percentage: perf.percentage,
+        grade: perf.grade,
+        rank: perf.rank,
+        isPassed: perf.isPassed,
+        totalSubjects: perf.totalSubjects,
+        subjectsPassed: perf.subjectsPassed,
+        subjectsFailed: perf.subjectsFailed,
+        isAbsent: perf.hasAbsent,
+        resultStatus: perf.resultStatus,
+      },
       create: {
         examId,
-        studentId,
-        totalMarksObtained: t.obtained,
-        totalPossibleMarks: t.possible,
-        percentage: Math.round(pct * 100) / 100,
-        grade,
-        rank: rankMap.get(studentId) ?? null,
-        isPassed: pct >= 40,
-      },
-      update: {
-        totalMarksObtained: t.obtained,
-        totalPossibleMarks: t.possible,
-        percentage: Math.round(pct * 100) / 100,
-        grade,
-        rank: rankMap.get(studentId) ?? null,
-        isPassed: pct >= 40,
+        studentId: perf.studentId,
+        totalMarksObtained: perf.totalObtained,
+        totalPossibleMarks: perf.totalPossible,
+        percentage: perf.percentage,
+        grade: perf.grade,
+        rank: perf.rank,
+        isPassed: perf.isPassed,
+        totalSubjects: perf.totalSubjects,
+        subjectsPassed: perf.subjectsPassed,
+        subjectsFailed: perf.subjectsFailed,
+        isAbsent: perf.hasAbsent,
+        resultStatus: perf.resultStatus,
       },
     })
   }
 }
 
-// ─── Class Result Summary ─────────────────────────────────────────────────────
+// ─── Class Result — auto-generated, read-only from ExamPerformance/Result ────
 
-export async function getClassResultSummary(examId: number) {
-  const exam = await prisma.exam.findUnique({
-    where: { id: examId },
-    include: {
-      class: { include: { subjects: true } },
-      academicYear: true,
-      examClasses: { include: { class: true } },
-    },
-  })
-  if (!exam) return null
-
-  const [performances, allResults] = await Promise.all([
-    prisma.examPerformance.findMany({
-      where: { examId },
-      include: {
-        student: {
-          select: { id: true, firstName: true, lastName: true, registrationNumber: true },
-        },
-      },
-      orderBy: { rank: 'asc' },
-    }),
-    prisma.result.findMany({
-      where: { examId },
-      include: { subject: { select: { id: true, name: true } } },
+export async function getClassResult(examId: number, classId: number) {
+  const [exam, subjects, students] = await Promise.all([
+    prisma.exam.findUnique({ where: { id: examId }, include: { academicYear: true } }),
+    getSubjectsByClass(classId),
+    prisma.student.findMany({
+      where: { classId, status: 'ACTIVE' },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
     }),
   ])
+  if (!exam) return null
 
-  // Subject-wise averages
-  const subjectMap = new Map<number, { name: string; obtained: number[]; possible: number[] }>()
-  allResults.forEach((r) => {
-    if (!subjectMap.has(r.subjectId)) {
-      subjectMap.set(r.subjectId, { name: r.subject.name, obtained: [], possible: [] })
-    }
-    const s = subjectMap.get(r.subjectId)!
-    s.obtained.push(Number(r.marksObtained))
-    s.possible.push(Number(r.totalMarks))
+  const studentIds = students.map((s) => s.id)
+  const subjectIds = subjects.map((s) => s.id)
+
+  const [performances, results, rollSlips] = await Promise.all([
+    prisma.examPerformance.findMany({ where: { examId, studentId: { in: studentIds } } }),
+    prisma.result.findMany({ where: { examId, subjectId: { in: subjectIds }, studentId: { in: studentIds } } }),
+    prisma.rollNumberSlip.findMany({ where: { examId, studentId: { in: studentIds } } }),
+  ])
+
+  const perfMap = new Map(performances.map((p) => [p.studentId, p]))
+  const rollMap = new Map(rollSlips.map((r) => [r.studentId, r.rollNumber]))
+  const resultsByStudent = new Map<number, Map<number, (typeof results)[number]>>()
+  results.forEach((r) => {
+    if (!resultsByStudent.has(r.studentId)) resultsByStudent.set(r.studentId, new Map())
+    resultsByStudent.get(r.studentId)!.set(r.subjectId, r)
   })
 
-  const subjectAverages = Array.from(subjectMap.entries()).map(([subjectId, s]) => {
-    const avgObtained = s.obtained.reduce((a, b) => a + b, 0) / s.obtained.length
-    const avgTotal = s.possible.reduce((a, b) => a + b, 0) / s.possible.length
+  const rows = students.map((s) => {
+    const perf = perfMap.get(s.id)
+    const subjectMarks = subjects.map((subj) => {
+      const r = resultsByStudent.get(s.id)?.get(subj.id)
+      return {
+        subjectId: subj.id,
+        marksObtained: r ? Number(r.marksObtained) : null,
+        totalMarks: r ? Number(r.totalMarks) : null,
+        isAbsent: r?.isAbsent ?? false,
+        isWithheld: r?.isWithheld ?? false,
+      }
+    })
     return {
-      subjectId,
-      name: s.name,
-      avgObtained: Math.round(avgObtained * 10) / 10,
-      avgTotal: Math.round(avgTotal * 10) / 10,
-      avgPct: avgTotal > 0 ? Math.round((avgObtained / avgTotal) * 1000) / 10 : 0,
+      student: s,
+      rollNumber: rollMap.get(s.id) ?? null,
+      subjectMarks,
+      totalObtained: perf ? Number(perf.totalMarksObtained) : null,
+      totalPossible: perf ? Number(perf.totalPossibleMarks) : null,
+      percentage: perf ? Number(perf.percentage) : null,
+      grade: perf?.grade ?? null,
+      rank: perf?.rank ?? null,
+      resultStatus: perf?.resultStatus ?? 'Pending',
+      isPassed: perf?.isPassed ?? false,
     }
-  }).sort((a, b) => a.name.localeCompare(b.name))
+  }).sort((a, b) => {
+    if (a.rank === null && b.rank === null) return 0
+    if (a.rank === null) return 1
+    if (b.rank === null) return -1
+    return a.rank - b.rank
+  })
 
-  const passCount = performances.filter((p) => p.isPassed).length
-  const failCount = performances.filter((p) => !p.isPassed).length
-  const classAvg = performances.length > 0
-    ? Math.round(performances.reduce((s, p) => s + Number(p.percentage), 0) / performances.length * 10) / 10
+  const subjectAverages = subjects.map((subj) => {
+    const marks = rows.map((r) => r.subjectMarks.find((m) => m.subjectId === subj.id))
+    const scored = marks.filter((m) => m && m.marksObtained !== null && !m.isAbsent && !m.isWithheld)
+    const avgObtained = scored.length > 0
+      ? Math.round((scored.reduce((sum, m) => sum + m!.marksObtained!, 0) / scored.length) * 10) / 10
+      : 0
+    const totalMarks = marks.find((m) => m && m.totalMarks !== null)?.totalMarks ?? 0
+    return { subjectId: subj.id, name: subj.name, totalMarks, avgObtained }
+  })
+
+  const withPerf = rows.filter((r) => r.percentage !== null)
+  const passCount = rows.filter((r) => r.resultStatus === 'Pass').length
+  const failCount = rows.filter((r) => r.resultStatus === 'Fail').length
+  const absentCount = rows.filter((r) => r.resultStatus === 'Absent').length
+  const withheldCount = rows.filter((r) => r.resultStatus === 'Withheld').length
+  const classAverage = withPerf.length > 0
+    ? Math.round((withPerf.reduce((sum, r) => sum + r.percentage!, 0) / withPerf.length) * 10) / 10
     : 0
+  const highest = withPerf.length > 0 ? Math.max(...withPerf.map((r) => r.percentage!)) : 0
+  const lowest = withPerf.length > 0 ? Math.min(...withPerf.map((r) => r.percentage!)) : 0
 
   return {
     exam,
-    performances,
-    subjectAverages,
-    classAverage: classAvg,
+    subjects,
+    rows,
+    totalStudents: students.length,
     passCount,
     failCount,
-    totalStudents: performances.length,
+    absentCount,
+    withheldCount,
+    classAverage,
+    highest,
+    lowest,
+    subjectAverages,
   }
 }
 
-// ─── Student Full Result (for result card) ────────────────────────────────────
+// ─── Student Full Result (for DMC / result card) — auto-generated ─────────────
 
 export async function getStudentFullResult(examId: number, studentId: number) {
-  const [exam, student, results, school] = await Promise.all([
+  const [exam, student, results, school, performance, rollSlip] = await Promise.all([
     prisma.exam.findUnique({
       where: { id: examId },
       include: { class: true, academicYear: true, examClasses: { include: { class: true } } },
@@ -419,72 +607,67 @@ export async function getStudentFullResult(examId: number, studentId: number) {
       orderBy: { subject: { name: 'asc' } },
     }),
     prisma.school.findFirst(),
+    prisma.examPerformance.findUnique({ where: { examId_studentId: { examId, studentId } } }),
+    prisma.rollNumberSlip.findUnique({ where: { studentId_examId: { studentId, examId } } }),
   ])
 
   if (!exam || !student) return null
 
   const displayClass = student.class ?? exam.class
+  const classLabel = displayClass ? `${displayClass.name} – ${displayClass.section}` : '—'
 
-  // Get or calculate performance
-  const performance = await prisma.examPerformance.findUnique({
-    where: { examId_studentId: { examId, studentId } },
-  })
-
-  const totalObtained = results.reduce((s, r) => s + Number(r.marksObtained), 0)
+  const totalObtained = results
+    .filter((r) => !r.isAbsent && !r.isWithheld)
+    .reduce((s, r) => s + Number(r.marksObtained), 0)
   const totalPossible = results.reduce((s, r) => s + Number(r.totalMarks), 0)
 
-  const classLabel = displayClass
-    ? `${displayClass.name} – ${displayClass.section}`
-    : '—'
-
-  if (!performance && totalPossible > 0) {
-    const pct = (totalObtained / totalPossible) * 100
-    const grade = calculateGrade(totalObtained, totalPossible)
-    // Calculate rank on the fly
-    const allPerf = await prisma.examPerformance.findMany({ where: { examId }, orderBy: { percentage: 'desc' } })
-    const totalRanked = allPerf.length + 1
-    const rank = allPerf.filter((p) => Number(p.percentage) > pct).length + 1
-    return {
-      exam, student, school, classLabel, results: results.map((r) => ({
-        subject: r.subject, marksObtained: Number(r.marksObtained),
-        totalMarks: Number(r.totalMarks),
-        grade: r.grade ?? calculateGrade(Number(r.marksObtained), Number(r.totalMarks)),
-        remarks: r.remarks ?? null,
-      })),
-      totalObtained, totalPossible,
-      percentage: Math.round(pct * 10) / 10,
-      overallGrade: grade,
-      passed: pct >= 40, rank, totalRanked,
-      subjectsPassed: results.filter((r) => Number(r.marksObtained) / Number(r.totalMarks) >= 0.4).length,
-      subjectsFailed: results.filter((r) => Number(r.marksObtained) / Number(r.totalMarks) < 0.4).length,
-    }
-  }
-
-  const pct = performance ? Number(performance.percentage) : 0
   const allPerf = await prisma.examPerformance.findMany({ where: { examId } })
   const totalRanked = allPerf.length
-  const perfRank = performance?.rank ?? null
-  const perfGrade = performance?.grade ?? 'N/A'
-  const perfPassed = performance?.isPassed ?? false
+
+  const percentage = performance
+    ? Number(performance.percentage)
+    : totalPossible > 0
+      ? Math.round((totalObtained / totalPossible) * 1000) / 10
+      : 0
+  const overallGrade = performance?.grade ?? (totalPossible > 0 ? calculateGrade(totalObtained, totalPossible) : 'N/A')
+  const resultStatus = performance?.resultStatus ?? (results.length === 0 ? 'Pending' : overallGrade === 'F' ? 'Fail' : 'Pass')
+  const passed = performance?.isPassed ?? resultStatus === 'Pass'
+  const rank = performance?.rank ?? null
+
+  const subjectsPassed = performance?.subjectsPassed ?? results.filter((r) =>
+    !r.isAbsent && !r.isWithheld && Number(r.totalMarks) > 0 && Number(r.marksObtained) / Number(r.totalMarks) >= 0.4
+  ).length
+  const subjectsFailed = performance?.subjectsFailed ?? results.filter((r) =>
+    !r.isAbsent && !r.isWithheld && Number(r.totalMarks) > 0 && Number(r.marksObtained) / Number(r.totalMarks) < 0.4
+  ).length
 
   return {
-    exam, student, school, classLabel,
+    exam,
+    student,
+    school,
+    classLabel,
+    rollNumber: rollSlip?.rollNumber ?? null,
     results: results.map((r) => ({
       subject: r.subject,
       marksObtained: Number(r.marksObtained),
       totalMarks: Number(r.totalMarks),
+      theoryMarks: r.theoryMarks !== null ? Number(r.theoryMarks) : null,
+      practicalMarks: r.practicalMarks !== null ? Number(r.practicalMarks) : null,
+      isAbsent: r.isAbsent,
+      isWithheld: r.isWithheld,
       grade: r.grade ?? calculateGrade(Number(r.marksObtained), Number(r.totalMarks)),
       remarks: r.remarks ?? null,
     })),
     totalObtained,
     totalPossible,
-    percentage: pct,
-    overallGrade: perfGrade,
-    passed: perfPassed,
-    rank: perfRank,
+    percentage,
+    overallGrade,
+    resultStatus,
+    passed,
+    rank,
     totalRanked,
-    subjectsPassed: results.filter((r) => Number(r.marksObtained) / Number(r.totalMarks) >= 0.4).length,
-    subjectsFailed: results.filter((r) => Number(r.marksObtained) / Number(r.totalMarks) < 0.4).length,
+    subjectsPassed,
+    subjectsFailed,
   }
 }
 
@@ -525,55 +708,6 @@ export async function getStudentResultHistory(studentId: number) {
       isPassed: p.isPassed,
     }
   })
-}
-
-// ─── Subject-wise Analysis ────────────────────────────────────────────────────
-
-export async function getSubjectWiseResult(examId: number, subjectId: number) {
-  const [subject, results] = await Promise.all([
-    prisma.subject.findUnique({ where: { id: subjectId } }),
-    prisma.result.findMany({
-      where: { examId, subjectId },
-      include: { student: { select: { id: true, firstName: true, lastName: true, registrationNumber: true } } },
-      orderBy: { marksObtained: 'desc' },
-    }),
-  ])
-  if (!subject || results.length === 0) return null
-
-  const rows = results.map((r) => {
-    const obtained = Number(r.marksObtained)
-    const total = Number(r.totalMarks)
-    const pct = total > 0 ? Math.round((obtained / total) * 1000) / 10 : 0
-    return {
-      studentId: r.studentId,
-      name: `${r.student.firstName} ${r.student.lastName}`,
-      registrationNumber: r.student.registrationNumber,
-      marksObtained: obtained,
-      totalMarks: total,
-      percentage: pct,
-      grade: r.grade ?? calculateGrade(obtained, total),
-      passed: pct >= 40,
-    }
-  })
-
-  const totalObtained = rows.reduce((s, r) => s + r.marksObtained, 0)
-  const totalPossible = rows.reduce((s, r) => s + r.totalMarks, 0)
-  const average = rows.length > 0 ? Math.round((totalObtained / totalPossible) * 1000) / 10 : 0
-
-  return {
-    subject,
-    results: rows,
-    topper: rows[0] ?? null,
-    average,
-    passCount: rows.filter((r) => r.passed).length,
-    failCount: rows.filter((r) => !r.passed).length,
-  }
-}
-
-// ─── Legacy: Student Result Card (kept for backward compat) ──────────────────
-
-export async function getStudentResultCard(examId: number, studentId: number) {
-  return getStudentFullResult(examId, studentId)
 }
 
 // ─── Exam Summary Report (reports page) ──────────────────────────────────────

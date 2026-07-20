@@ -72,7 +72,7 @@ export default function StudentResultsTab({ studentId }: { studentId: number }) 
                   {item.isPassed ? 'Pass' : 'Fail'}
                 </Badge>
                 <Link
-                  href={`/print/result-card/${item.examId}/${studentId}`}
+                  href={`/print/dmc/${item.examId}/${studentId}`}
                   target="_blank"
                   className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'gap-1.5 text-xs')}
                 >

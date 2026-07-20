@@ -325,6 +325,10 @@ model Result {
   subjectId      Int
   marksObtained  Decimal  @db.Decimal(5, 2)
   totalMarks     Decimal  @db.Decimal(5, 2)
+  theoryMarks    Decimal? @db.Decimal(5, 2)
+  practicalMarks Decimal? @db.Decimal(5, 2)
+  isAbsent       Boolean  @default(false)
+  isWithheld     Boolean  @default(false)
   grade          String?
   remarks        String?
   createdAt      DateTime @default(now())
@@ -346,6 +350,11 @@ model ExamPerformance {
   grade              String
   rank               Int?
   isPassed           Boolean  @default(true)
+  totalSubjects      Int      @default(0)
+  subjectsPassed     Int      @default(0)
+  subjectsFailed     Int      @default(0)
+  isAbsent           Boolean  @default(false)
+  resultStatus       String   @default("Pass")
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

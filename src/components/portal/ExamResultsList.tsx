@@ -64,7 +64,7 @@ export default function ExamResultsList({ studentId }: { studentId: number }) {
                 </div>
               </div>
               <Link
-                href={`/print/result-card/${r.examId}/${studentId}`}
+                href={`/print/dmc/${r.examId}/${studentId}`}
                 target="_blank"
                 className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'mt-3 min-h-9 w-full gap-1.5')}
               >
