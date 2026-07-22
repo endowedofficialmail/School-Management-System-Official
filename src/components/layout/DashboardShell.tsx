@@ -12,6 +12,7 @@ interface DashboardShellProps {
   userEmail?: string
   schoolName: string
   schoolLogoUrl?: string | null
+  lmsEnabled?: boolean
   banner?: React.ReactNode
 }
 
@@ -21,6 +22,7 @@ export default function DashboardShell({
   userRole,
   schoolName,
   schoolLogoUrl,
+  lmsEnabled = false,
   banner,
 }: DashboardShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -33,6 +35,7 @@ export default function DashboardShell({
         onClose={() => setSidebarOpen(false)}
         schoolName={schoolName}
         schoolLogoUrl={schoolLogoUrl}
+        lmsEnabled={lmsEnabled}
       />
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
         <Header

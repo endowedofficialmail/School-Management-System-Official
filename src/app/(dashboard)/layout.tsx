@@ -2,6 +2,7 @@ import { getServerSession } from 'next-auth'
 import { redirect } from 'next/navigation'
 import { authOptions } from '@/lib/auth'
 import { getSchoolProfile } from '@/lib/actions/settings'
+import { getLMSSettings } from '@/lib/actions/lms'
 import DashboardShell from '@/components/layout/DashboardShell'
 import ProfileIncompleteBanner from '@/components/shared/ProfileIncompleteBanner'
 import { UserRole } from '@/types'
@@ -25,7 +26,10 @@ export default async function DashboardLayout({
     redirect('/portal/parent')
   }
 
-  const school = await getSchoolProfile()
+  const [school, lmsSettings] = await Promise.all([
+    getSchoolProfile(),
+    getLMSSettings(),
+  ])
   const schoolName = school?.name ?? 'School Management'
 
   return (
@@ -35,6 +39,7 @@ export default async function DashboardLayout({
       userEmail={session.user.email ?? ''}
       schoolName={schoolName}
       schoolLogoUrl={school?.logoUrl}
+      lmsEnabled={lmsSettings.isEnabled}
       banner={
         <ProfileIncompleteBanner
           schoolName={school?.name}

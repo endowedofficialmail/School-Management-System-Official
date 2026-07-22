@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation'
 import { authOptions } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import PortalHeader from '@/components/portal/PortalHeader'
+import PortalNav from '@/components/portal/PortalNav'
+import { getLMSSettings } from '@/lib/actions/lms'
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   const session = await getServerSession(authOptions)
@@ -12,7 +14,10 @@ export default async function PortalLayout({ children }: { children: React.React
     redirect('/dashboard')
   }
 
-  const school = await prisma.school.findFirst({ select: { name: true } })
+  const [school, lmsSettings] = await Promise.all([
+    prisma.school.findFirst({ select: { name: true } }),
+    getLMSSettings(),
+  ])
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -21,6 +26,10 @@ export default async function PortalLayout({ children }: { children: React.React
         userName={session.user.name ?? 'User'}
       />
       <main className="mx-auto max-w-3xl px-4 py-4 pb-20">
+        <PortalNav
+          role={session.user.role as 'STUDENT' | 'PARENT'}
+          lmsEnabled={lmsSettings.isEnabled}
+        />
         {children}
       </main>
     </div>

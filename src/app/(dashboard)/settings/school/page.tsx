@@ -13,6 +13,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import BackButton from '@/components/shared/BackButton'
 import { compressAndConvertToBase64 } from '@/lib/utils'
 import { getSchoolProfile, updateSchoolProfile } from '@/lib/actions/settings'
+import { getLMSSettings, toggleLMS } from '@/lib/actions/lms'
+import { Switch } from '@/components/ui/switch'
 
 const profileSchema = z.object({
   name: z.string().min(3, 'School name must be at least 3 characters'),
@@ -39,6 +41,9 @@ export default function SchoolProfilePage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [fileWarning, setFileWarning] = useState('')
+  const [lmsEnabled, setLmsEnabled] = useState(false)
+  const [lmsLoading, setLmsLoading] = useState(true)
+  const [lmsToggling, setLmsToggling] = useState(false)
 
   useEffect(() => {
     getSchoolProfile().then((school) => {
@@ -52,6 +57,10 @@ export default function SchoolProfilePage() {
         })
       }
       setLoading(false)
+    })
+    getLMSSettings().then((settings) => {
+      setLmsEnabled(settings.isEnabled)
+      setLmsLoading(false)
     })
   }, [])
 
@@ -103,6 +112,19 @@ export default function SchoolProfilePage() {
       toast.error(error instanceof Error ? error.message : 'Failed to update school profile')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleLmsToggle(enabled: boolean) {
+    setLmsToggling(true)
+    try {
+      await toggleLMS(enabled)
+      setLmsEnabled(enabled)
+      toast.success(enabled ? 'LMS enabled' : 'LMS disabled')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update LMS setting')
+    } finally {
+      setLmsToggling(false)
     }
   }
 
@@ -197,6 +219,36 @@ export default function SchoolProfilePage() {
                 </Button>
               </div>
             </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-sm">
+        <CardHeader className="pb-4">
+          <CardTitle className="text-base font-semibold">Module Settings</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {lmsLoading ? (
+            <div className="h-16 bg-slate-100 rounded-lg animate-pulse" />
+          ) : (
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <p className="font-medium text-slate-900">Learning Management System</p>
+                <p className="text-sm text-muted-foreground">
+                  Enable online courses, lessons, homework tracking, and announcements for teachers, students, and parents
+                </p>
+                {!lmsEnabled && (
+                  <p className="text-xs text-amber-600 mt-2">
+                    Disabling LMS will hide it from all users but data will be preserved
+                  </p>
+                )}
+              </div>
+              <Switch
+                checked={lmsEnabled}
+                disabled={lmsToggling}
+                onCheckedChange={handleLmsToggle}
+              />
+            </div>
           )}
         </CardContent>
       </Card>

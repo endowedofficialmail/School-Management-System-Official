@@ -12,14 +12,38 @@ import FeeVoucherList from '@/components/portal/FeeVoucherList'
 import StudentSummaryCard from '@/components/portal/StudentSummaryCard'
 import { formatRs } from '@/components/vouchers/VoucherDocument'
 import { ordinal } from '@/lib/grade'
+import ParentLMSSection from '@/components/portal/ParentLMSSection'
 import { type ParentPortalData } from '@/lib/actions/portal'
+
+type LMSData = {
+  courses: Array<{
+    id: number
+    title: string
+    subject: { name: string }
+    progress: { completedLessons: number; totalLessons: number; completionPercentage: number }
+  }>
+  announcements: Array<{
+    id: number
+    title: string
+    isImportant: boolean
+    createdAt: Date
+    postedBy: { name: string }
+  }>
+  homeworkSummary: {
+    done: number
+    total: number
+    items: Array<{ id: number; title: string; isDone: boolean; course: { title: string } }>
+  }
+}
 
 export default function ParentPortalClient({
   data,
   school,
+  lmsData,
 }: {
   data: ParentPortalData
   school: { phone?: string | null; email?: string | null } | null
+  lmsData?: LMSData | null
 }) {
   const [studentId, setStudentId] = useState(String(data.students[0]?.student.id ?? ''))
   const selected = useMemo(
@@ -105,6 +129,15 @@ export default function ParentPortalClient({
 
       <FeeVoucherList studentId={student.id} limit={6} />
       <ExamResultsList studentId={student.id} />
+
+      {lmsData && (
+        <ParentLMSSection
+          courses={lmsData.courses}
+          announcements={lmsData.announcements}
+          homeworkSummary={lmsData.homeworkSummary}
+          studentName={`${student.firstName} ${student.lastName}`}
+        />
+      )}
 
       <Card className="shadow-sm">
         <CardHeader className="pb-3">

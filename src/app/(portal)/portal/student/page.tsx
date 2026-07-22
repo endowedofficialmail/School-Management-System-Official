@@ -1,14 +1,18 @@
 import { getServerSession } from 'next-auth'
 import { redirect } from 'next/navigation'
-import { format } from 'date-fns'
+import { format, isToday, isPast } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import AttendanceCalendar from '@/components/portal/AttendanceCalendar'
 import ExamResultsList from '@/components/portal/ExamResultsList'
 import FeeVoucherList from '@/components/portal/FeeVoucherList'
 import StudentSummaryCard from '@/components/portal/StudentSummaryCard'
+import StudentLMSSection from '@/components/portal/StudentLMSSection'
 import { authOptions } from '@/lib/auth'
 import { getStudentAttendanceSummary, getStudentPortalData } from '@/lib/actions/portal'
+import {
+  getLMSSettings, getCourses, getAnnouncements, getHomework, getStudentProgress,
+} from '@/lib/actions/lms'
 import { formatRs } from '@/components/vouchers/VoucherDocument'
 import { ordinal } from '@/lib/grade'
 
@@ -36,6 +40,35 @@ export default async function StudentPortalPage() {
       return sum + Number(v.totalAmount)
     }, 0)
   const advanceBalance = Number(student.advanceBalance ?? 0)
+
+  const lmsSettings = await getLMSSettings()
+  let lmsData = null
+  if (lmsSettings.isEnabled && session.user.id) {
+    try {
+      const userId = Number(session.user.id)
+      const [courses, announcements, allHomework] = await Promise.all([
+        getCourses({ userId, role: 'STUDENT' }),
+        getAnnouncements({ userId, role: 'STUDENT', limit: 3 }),
+        getHomework({ userId, role: 'STUDENT', studentId: student.id }),
+      ])
+
+      const coursesWithProgress = await Promise.all(
+        courses.map(async (c) => {
+          const progress = await getStudentProgress(c.id, student.id)
+          return { ...c, progress }
+        })
+      )
+
+      const todayHomework = allHomework.filter((hw) => {
+        const due = new Date(hw.dueDate)
+        return isToday(due) || (isPast(due) && !hw.isDone)
+      })
+
+      lmsData = { courses: coursesWithProgress, announcements, homework: todayHomework }
+    } catch {
+      lmsData = null
+    }
+  }
 
   return (
     <div className="space-y-4 text-[15px]">
@@ -69,6 +102,16 @@ export default async function StudentPortalPage() {
       <AttendanceCalendar studentId={student.id} />
       <FeeVoucherList studentId={student.id} />
       <ExamResultsList studentId={student.id} />
+
+      {lmsData && (
+        <StudentLMSSection
+          courses={lmsData.courses}
+          announcements={lmsData.announcements}
+          homework={lmsData.homework}
+          studentId={student.id}
+          userId={Number(session.user.id)}
+        />
+      )}
 
       <details className="rounded-xl border bg-white p-4 shadow-sm">
         <summary className="cursor-pointer font-semibold">Profile Info</summary>

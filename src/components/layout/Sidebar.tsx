@@ -15,6 +15,9 @@ import {
   Settings,
   Award,
   BadgeCheck,
+  BookOpen,
+  Bell,
+  ClipboardList,
 } from 'lucide-react'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
@@ -96,23 +99,56 @@ const navItems: NavItem[] = [
   },
 ]
 
+const lmsNavItems: NavItem[] = [
+  {
+    title: 'LMS Dashboard',
+    href: '/lms',
+    icon: LayoutDashboard,
+    roles: ['ADMIN', 'TEACHER', 'RECEPTIONIST'],
+  },
+  {
+    title: 'Courses',
+    href: '/lms/courses',
+    icon: BookOpen,
+    roles: ['ADMIN', 'TEACHER'],
+  },
+  {
+    title: 'Announcements',
+    href: '/lms/announcements',
+    icon: Bell,
+    roles: ['ADMIN', 'TEACHER'],
+  },
+  {
+    title: 'Homework',
+    href: '/lms/homework',
+    icon: ClipboardList,
+    roles: ['ADMIN', 'TEACHER'],
+  },
+]
+
 interface SidebarProps {
   role: UserRole
   isOpen: boolean
   onClose: () => void
   schoolName: string
   schoolLogoUrl?: string | null
+  lmsEnabled?: boolean
 }
 
 function NavLinks({
   role,
   onLinkClick,
+  lmsEnabled = false,
 }: {
   role: UserRole
   onLinkClick?: () => void
+  lmsEnabled?: boolean
 }) {
   const pathname = usePathname()
   const filtered = navItems.filter((item) => item.roles.includes(role))
+  const lmsFiltered = lmsEnabled
+    ? lmsNavItems.filter((item) => item.roles.includes(role))
+    : []
 
   return (
     <nav className="flex-1 space-y-0.5 px-3 py-4">
@@ -137,6 +173,37 @@ function NavLinks({
           </Link>
         )
       })}
+
+      {lmsFiltered.length > 0 && (
+        <>
+          <div className="my-3 border-t pt-3">
+            <p className="px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              LMS
+            </p>
+          </div>
+          {lmsFiltered.map((item) => {
+            const Icon = item.icon
+            const isActive =
+              pathname === item.href || pathname.startsWith(item.href + '/')
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={onLinkClick}
+                className={cn(
+                  'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150',
+                  isActive
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {item.title}
+              </Link>
+            )
+          })}
+        </>
+      )}
     </nav>
   )
 }
@@ -145,11 +212,13 @@ function SidebarInner({
   role,
   schoolName,
   schoolLogoUrl,
+  lmsEnabled = false,
   onLinkClick,
 }: {
   role: UserRole
   schoolName: string
   schoolLogoUrl?: string | null
+  lmsEnabled?: boolean
   onLinkClick?: () => void
 }) {
   // Truncate long school names for the sidebar header
@@ -179,7 +248,7 @@ function SidebarInner({
           <span className="text-xs text-slate-500">Management System</span>
         </div>
       </div>
-      <NavLinks role={role} onLinkClick={onLinkClick} />
+      <NavLinks role={role} onLinkClick={onLinkClick} lmsEnabled={lmsEnabled} />
       <div className="border-t px-5 py-3 text-[11px] text-slate-400">
         v1.0.0
       </div>
@@ -187,18 +256,18 @@ function SidebarInner({
   )
 }
 
-export default function Sidebar({ role, isOpen, onClose, schoolName, schoolLogoUrl }: SidebarProps) {
+export default function Sidebar({ role, isOpen, onClose, schoolName, schoolLogoUrl, lmsEnabled = false }: SidebarProps) {
   return (
     <>
       {/* Desktop sidebar — always visible on md+ */}
       <aside className="hidden md:flex w-64 shrink-0 flex-col border-r bg-white h-screen sticky top-0 overflow-y-auto">
-        <SidebarInner role={role} schoolName={schoolName} schoolLogoUrl={schoolLogoUrl} />
+        <SidebarInner role={role} schoolName={schoolName} schoolLogoUrl={schoolLogoUrl} lmsEnabled={lmsEnabled} />
       </aside>
 
       {/* Mobile sidebar — rendered as Sheet */}
       <Sheet open={isOpen} onOpenChange={(open) => { if (!open) onClose() }}>
         <SheetContent side="left" className="w-64 p-0">
-          <SidebarInner role={role} schoolName={schoolName} schoolLogoUrl={schoolLogoUrl} onLinkClick={onClose} />
+          <SidebarInner role={role} schoolName={schoolName} schoolLogoUrl={schoolLogoUrl} lmsEnabled={lmsEnabled} onLinkClick={onClose} />
         </SheetContent>
       </Sheet>
     </>

@@ -78,6 +78,10 @@ model User {
   issuedCertificates Certificate[] @relation("issuedCertificates")
   promotionRecords  PromotionRecord[]
   issuedRollSlips   RollNumberSlip[]
+  taughtCourses     Course[] @relation("CourseTeacher")
+  postedAnnouncements Announcement[] @relation("AnnouncementAuthor")
+  postedHomeworks   Homework[] @relation("HomeworkAuthor")
+  announcementReceipts AnnouncementReadReceipt[]
 }
 
 model School {
@@ -89,6 +93,8 @@ model School {
   logoUrl   String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  lmsSettings LMSSettings?
 }
 
 model AcademicYear {
@@ -125,6 +131,8 @@ model Class {
   promotionsFrom PromotionRecord[] @relation("PromotionFromClass")
   promotionsTo   PromotionRecord[] @relation("PromotionToClass")
   examClasses    ExamClass[]
+  courses        Course[]
+  announcements  Announcement[]
 
   @@unique([name, section, academicYearId])
 }
@@ -160,6 +168,8 @@ model Student {
   advanceLogs        AdvanceBalanceLog[]
   promotionRecords   PromotionRecord[]
   rollNumberSlips    RollNumberSlip[]
+  lessonCompletions  LessonCompletion[]
+  homeworkCompletions HomeworkCompletion[]
 
   @@index([classId])
   @@index([status])
@@ -202,6 +212,7 @@ model Subject {
   results          Result[]
   datesheetEntries DatesheetEntry[]
   timetableEntries TimetableEntry[]
+  course           Course?
 }
 
 model FeeStructure {
@@ -544,4 +555,118 @@ model Certificate {
   notes             String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+}
+
+// ─── LMS Phase 1 ─────────────────────────────────────────────────────────────
+
+model LMSSettings {
+  id        Int      @id @default(autoincrement())
+  school    School   @relation(fields: [schoolId], references: [id])
+  schoolId  Int      @unique
+  isEnabled Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Course {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  subject     Subject  @relation(fields: [subjectId], references: [id])
+  subjectId   Int      @unique
+  class       Class    @relation(fields: [classId], references: [id])
+  classId     Int
+  teacher     User     @relation("CourseTeacher", fields: [teacherId], references: [id])
+  teacherId   Int
+  isPublished Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lessons       Lesson[]
+  announcements Announcement[]
+  homeworks     Homework[]
+
+  @@unique([subjectId, classId])
+}
+
+model Lesson {
+  id          Int      @id @default(autoincrement())
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId    Int
+  title       String
+  content     String?  @db.Text
+  videoUrl    String?
+  pdfUrl      String?
+  order       Int      @default(0)
+  isPublished Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  completions LessonCompletion[]
+}
+
+model LessonCompletion {
+  id          Int      @id @default(autoincrement())
+  lesson      Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  lessonId    Int
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId   Int
+  completedAt DateTime @default(now())
+
+  @@unique([lessonId, studentId])
+}
+
+model Announcement {
+  id          Int      @id @default(autoincrement())
+  title       String
+  content     String   @db.Text
+  course      Course?  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId    Int?
+  class       Class?   @relation(fields: [classId], references: [id])
+  classId     Int?
+  postedBy    User     @relation("AnnouncementAuthor", fields: [postedById], references: [id])
+  postedById  Int
+  isImportant Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  readReceipts AnnouncementReadReceipt[]
+}
+
+model AnnouncementReadReceipt {
+  id             Int          @id @default(autoincrement())
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  announcementId Int
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         Int
+  readAt         DateTime     @default(now())
+
+  @@unique([announcementId, userId])
+}
+
+model Homework {
+  id          Int      @id @default(autoincrement())
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId    Int
+  title       String
+  description String?  @db.Text
+  dueDate     DateTime
+  postedBy    User     @relation("HomeworkAuthor", fields: [postedById], references: [id])
+  postedById  Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  completions HomeworkCompletion[]
+}
+
+model HomeworkCompletion {
+  id         Int       @id @default(autoincrement())
+  homework   Homework  @relation(fields: [homeworkId], references: [id], onDelete: Cascade)
+  homeworkId Int
+  student    Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId  Int
+  isDone     Boolean   @default(false)
+  markedAt   DateTime?
+
+  @@unique([homeworkId, studentId])
 }
