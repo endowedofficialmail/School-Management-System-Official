@@ -12,6 +12,7 @@ import {
   Pencil,
   Eye,
   Users,
+  Upload,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -135,10 +136,18 @@ export default function StudentsPage() {
           </div>
         </div>
         {canModify && (
-          <Link href="/students/new" className={buttonVariants()}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Student
-          </Link>
+          <div className="flex items-center gap-2">
+            {session?.user?.role === 'ADMIN' && (
+              <Link href="/students/import" className={buttonVariants({ variant: 'outline' })}>
+                <Upload className="h-4 w-4 mr-2" />
+                Import Students
+              </Link>
+            )}
+            <Link href="/students/new" className={buttonVariants()}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Student
+            </Link>
+          </div>
         )}
       </div>
 

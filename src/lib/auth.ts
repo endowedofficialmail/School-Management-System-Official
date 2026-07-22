@@ -43,22 +43,35 @@ export const authOptions: NextAuthOptions = {
           email: user.email,
           name: user.name,
           role: user.role,
+          mustChangePassword: user.mustChangePassword,
         }
       },
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
         token.role = (user as { role: string }).role
         token.id = user.id ?? ''
+        token.mustChangePassword = (user as { mustChangePassword?: boolean }).mustChangePassword ?? false
       }
+
+      // Keep mustChangePassword in sync for portal users (and after session.update)
+      if (token.id && (token.role === 'STUDENT' || token.role === 'PARENT' || trigger === 'update')) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: Number(token.id) },
+          select: { mustChangePassword: true },
+        })
+        token.mustChangePassword = dbUser?.mustChangePassword ?? false
+      }
+
       return token
     },
     async session({ session, token }) {
       if (session.user) {
         session.user.role = token.role
         session.user.id = token.id
+        session.user.mustChangePassword = Boolean(token.mustChangePassword)
       }
       return session
     },

@@ -3,6 +3,7 @@
 import { prisma } from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { Gender, StudentStatus } from '@prisma/client'
+import { createPortalAccountsForStudent, type PortalCredentials } from '@/lib/actions/bulk-import'
 
 export type StudentWithClass = Awaited<ReturnType<typeof getStudents>>[number]
 export type ClassWithYear = Awaited<ReturnType<typeof getClasses>>[number]
@@ -82,7 +83,10 @@ export interface CreateStudentInput {
   status?: StudentStatus
 }
 
-export async function createStudent(data: CreateStudentInput) {
+export async function createStudent(data: CreateStudentInput): Promise<{
+  student: Awaited<ReturnType<typeof prisma.student.create>>
+  portalCredentials: PortalCredentials | null
+}> {
   const registrationNumber = await generateRegistrationNumber()
 
   const student = await prisma.student.create({
@@ -102,8 +106,16 @@ export async function createStudent(data: CreateStudentInput) {
     },
   })
 
+  let portalCredentials: PortalCredentials | null = null
+  try {
+    portalCredentials = await createPortalAccountsForStudent(student.id)
+  } catch (e) {
+    console.error('Portal account creation failed:', e)
+  }
+
   revalidatePath('/students')
-  return student
+  revalidatePath('/settings/users')
+  return { student, portalCredentials }
 }
 
 export interface UpdateStudentInput {

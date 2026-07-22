@@ -10,6 +10,9 @@ import { buttonVariants } from '@/components/ui/button'
 import StudentForm, { StudentFormValues } from '@/components/shared/StudentForm'
 import { createStudent } from '@/lib/actions/students'
 import Breadcrumb from '@/components/shared/Breadcrumb'
+import PortalCredentialsDialog, {
+  type CredentialsDialogData,
+} from '@/components/students/PortalCredentialsDialog'
 
 function NewStudentForm() {
   const router = useRouter()
@@ -17,11 +20,13 @@ function NewStudentForm() {
   const preselectedClassId = searchParams.get('classId') ?? undefined
 
   const [isLoading, setIsLoading] = useState(false)
+  const [credentialsOpen, setCredentialsOpen] = useState(false)
+  const [credentials, setCredentials] = useState<CredentialsDialogData | null>(null)
 
   async function handleSubmit(data: StudentFormValues) {
     setIsLoading(true)
     try {
-      await createStudent({
+      const result = await createStudent({
         firstName: data.firstName,
         lastName: data.lastName,
         gender: data.gender,
@@ -34,8 +39,20 @@ function NewStudentForm() {
         admissionDate: data.admissionDate || undefined,
         status: data.status,
       })
-      toast.success('Student added successfully')
-      router.push('/students')
+
+      if (result.portalCredentials) {
+        setCredentials({
+          ...result.portalCredentials,
+          studentName: `${result.student.firstName} ${result.student.lastName}`,
+          registrationNumber: result.student.registrationNumber,
+          className: '',
+        })
+        setCredentialsOpen(true)
+        toast.success('Student added successfully')
+      } else {
+        toast.success('Student added successfully')
+        router.push('/students')
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to add student')
     } finally {
@@ -44,12 +61,22 @@ function NewStudentForm() {
   }
 
   return (
-    <StudentForm
-      defaultValues={preselectedClassId ? { classId: preselectedClassId } : undefined}
-      onSubmit={handleSubmit}
-      isLoading={isLoading}
-      submitLabel="Save Student"
-    />
+    <>
+      <StudentForm
+        defaultValues={preselectedClassId ? { classId: preselectedClassId } : undefined}
+        onSubmit={handleSubmit}
+        isLoading={isLoading}
+        submitLabel="Save Student"
+      />
+      <PortalCredentialsDialog
+        open={credentialsOpen}
+        data={credentials}
+        onContinue={() => {
+          setCredentialsOpen(false)
+          router.push('/students')
+        }}
+      />
+    </>
   )
 }
 

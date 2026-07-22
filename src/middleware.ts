@@ -10,9 +10,10 @@ export async function middleware(request: NextRequest) {
   })
 
   const isLMSRoute = pathname.startsWith('/lms')
+  const isChangePassword = pathname.startsWith('/portal/change-password')
   const isStudentPortal = pathname.startsWith('/portal/student')
   const isParentPortal = pathname.startsWith('/portal/parent')
-  const isPortalRoute = isStudentPortal || isParentPortal
+  const isPortalRoute = isStudentPortal || isParentPortal || isChangePassword
 
   if (!isLMSRoute && !isPortalRoute) {
     return NextResponse.next()
@@ -25,6 +26,14 @@ export async function middleware(request: NextRequest) {
   }
 
   const role = token.role as string
+  const mustChangePassword = Boolean(token.mustChangePassword)
+
+  if (isChangePassword) {
+    if (role !== 'STUDENT' && role !== 'PARENT') {
+      return NextResponse.redirect(new URL('/dashboard', request.url))
+    }
+    return NextResponse.next()
+  }
 
   if (isLMSRoute) {
     if (role === 'STUDENT' || role === 'PARENT') {
@@ -35,7 +44,6 @@ export async function middleware(request: NextRequest) {
     if (!['ADMIN', 'TEACHER', 'RECEPTIONIST'].includes(role)) {
       return NextResponse.redirect(new URL('/dashboard', request.url))
     }
-
   }
 
   if (isStudentPortal && role !== 'STUDENT') {
@@ -52,9 +60,19 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard', request.url))
   }
 
+  // Force password change on first portal login
+  if ((isStudentPortal || isParentPortal) && mustChangePassword) {
+    return NextResponse.redirect(new URL('/portal/change-password', request.url))
+  }
+
   return NextResponse.next()
 }
 
 export const config = {
-  matcher: ['/lms/:path*', '/portal/student/:path*', '/portal/parent/:path*'],
+  matcher: [
+    '/lms/:path*',
+    '/portal/student/:path*',
+    '/portal/parent/:path*',
+    '/portal/change-password',
+  ],
 }

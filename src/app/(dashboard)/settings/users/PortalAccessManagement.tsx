@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { KeyRound, Link2, Trash2, Copy } from 'lucide-react'
+import { KeyRound, Link2, Trash2, Copy, Download, ChevronDown } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,6 +20,10 @@ import {
   removeStudentPortalAccess,
   type PortalManagementData,
 } from '@/lib/actions/portal'
+import {
+  resetAllStudentPasswordsToRegNumbers,
+  getAllPortalCredentialsExport,
+} from '@/lib/actions/bulk-import'
 
 type StudentOption = PortalManagementData['students'][number]
 
@@ -34,6 +38,9 @@ export default function PortalAccessManagement() {
   const [parentOpen, setParentOpen] = useState(false)
   const [credentials, setCredentials] = useState<{ title: string; email: string; password: string } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [resetOpen, setResetOpen] = useState(false)
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkBusy, setBulkBusy] = useState(false)
 
   const [studentForm, setStudentForm] = useState({ studentId: '', email: '', password: '', confirm: '' })
   const [studentSearch, setStudentSearch] = useState('')
@@ -335,6 +342,101 @@ export default function PortalAccessManagement() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setCredentials(null)}>Close</Button>
             <Button onClick={copyCredentials} className="gap-2"><Copy className="h-4 w-4" />Copy Credentials</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Credentials Reset */}
+      <div className="border-t pt-4 mt-2">
+        <button
+          type="button"
+          className="flex w-full items-center justify-between text-left"
+          onClick={() => setBulkOpen((o) => !o)}
+        >
+          <div>
+            <p className="font-semibold text-sm">Bulk Credentials Reset</p>
+            <p className="text-xs text-muted-foreground">Admin tools for portal passwords and credential exports</p>
+          </div>
+          <ChevronDown className={`h-4 w-4 transition-transform ${bulkOpen ? 'rotate-180' : ''}`} />
+        </button>
+
+        {bulkOpen && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              disabled={bulkBusy}
+              onClick={() => setResetOpen(true)}
+            >
+              <KeyRound className="h-4 w-4 mr-2" />
+              Reset All Student Passwords to Registration Numbers
+            </Button>
+            <Button
+              variant="outline"
+              disabled={bulkBusy}
+              onClick={async () => {
+                setBulkBusy(true)
+                try {
+                  const rows = await getAllPortalCredentialsExport()
+                  const header = ['Student Name', 'Reg#', 'Class', 'Student Email', 'Parent Email', 'Parent Account Status']
+                  const csv = [
+                    header.join(','),
+                    ...rows.map((r) =>
+                      [r.studentName, r.registrationNumber, r.className, r.studentEmail, r.parentEmail, r.parentAccountStatus]
+                        .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+                        .join(',')
+                    ),
+                  ].join('\n')
+                  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = 'all-portal-credentials.csv'
+                  a.click()
+                  URL.revokeObjectURL(url)
+                  toast.success('Credentials CSV downloaded (emails only)')
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : 'Failed to export')
+                } finally {
+                  setBulkBusy(false)
+                }
+              }}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Download All Portal Credentials
+            </Button>
+          </div>
+        )}
+      </div>
+
+      <Dialog open={resetOpen} onOpenChange={setResetOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reset All Student Passwords?</DialogTitle>
+            <DialogDescription>
+              This will reset ALL student portal passwords to their registration numbers.
+              Students will be prompted to change on next login. Are you sure?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResetOpen(false)} disabled={bulkBusy}>Cancel</Button>
+            <Button
+              className="bg-red-600 hover:bg-red-700"
+              disabled={bulkBusy}
+              onClick={async () => {
+                setBulkBusy(true)
+                try {
+                  const { count } = await resetAllStudentPasswordsToRegNumbers()
+                  toast.success(`Reset ${count} student passwords`)
+                  setResetOpen(false)
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : 'Failed to reset')
+                } finally {
+                  setBulkBusy(false)
+                }
+              }}
+            >
+              {bulkBusy ? 'Resetting...' : 'Yes, Reset All'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

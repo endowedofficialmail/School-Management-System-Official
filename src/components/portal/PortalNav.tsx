@@ -26,6 +26,7 @@ export default function PortalNav({
 }) {
   const pathname = usePathname()
   if (!lmsEnabled) return null
+  if (pathname.startsWith('/portal/change-password')) return null
 
   const links = role === 'STUDENT' ? studentLinks : parentLinks
 

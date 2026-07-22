@@ -278,3 +278,21 @@ export async function getPortalManagementData() {
 
   return { studentProfiles, parentProfiles, students }
 }
+
+export async function changePortalPassword(userId: number, newPassword: string) {
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id || Number(session.user.id) !== userId) {
+    throw new Error('Unauthorized')
+  }
+  if (session.user.role !== 'STUDENT' && session.user.role !== 'PARENT') {
+    throw new Error('Unauthorized')
+  }
+  if (newPassword.length < 6) throw new Error('Password must be at least 6 characters')
+
+  const hashed = await bcrypt.hash(newPassword, 12)
+  await prisma.user.update({
+    where: { id: userId },
+    data: { password: hashed, mustChangePassword: false },
+  })
+}
+
