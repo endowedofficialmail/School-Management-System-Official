@@ -3,7 +3,6 @@
 import { useMemo, useState } from 'react'
 import { format, isToday, isPast } from 'date-fns'
 import { Check } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 

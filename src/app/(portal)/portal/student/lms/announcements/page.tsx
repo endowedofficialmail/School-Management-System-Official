@@ -1,6 +1,5 @@
 import { getServerSession } from 'next-auth'
 import { redirect } from 'next/navigation'
-import { format } from 'date-fns'
 import { authOptions } from '@/lib/auth'
 import { getLMSSettings, getAnnouncements } from '@/lib/actions/lms'
 import StudentAnnouncementsClient from '@/components/portal/StudentAnnouncementsClient'

@@ -1,7 +1,6 @@
 import { getServerSession } from 'next-auth'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { format } from 'date-fns'
 import { authOptions } from '@/lib/auth'
 import { getParentPortalData } from '@/lib/actions/portal'
 import { getLMSSettings, getAnnouncements } from '@/lib/actions/lms'

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { BookOpen, Plus, Trash2, Pencil, Eye } from 'lucide-react'
+import { BookOpen, Plus, Trash2, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'

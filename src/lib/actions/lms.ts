@@ -6,10 +6,7 @@ import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { authOptions } from '@/lib/auth'
 import {
-  requireCourseOwnership,
-  requireLMSEnabled,
   requireParentChildLink,
-  requireRole,
   requireStudentSelf,
 } from '@/lib/security'
 
@@ -966,7 +963,6 @@ export async function getLMSDashboardStats(userId: number, role: string) {
     })
 
     const courseIds = myCourses.map((c) => c.id)
-    const classIds = Array.from(new Set(myCourses.map((c) => c.classId)))
 
     const pendingHomework = await prisma.homework.count({
       where: {
