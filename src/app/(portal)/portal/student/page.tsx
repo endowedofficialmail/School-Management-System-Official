@@ -44,30 +44,40 @@ export default async function StudentPortalPage() {
   const lmsSettings = await getLMSSettings()
   let lmsData = null
   if (lmsSettings.isEnabled && session.user.id) {
-    try {
-      const userId = Number(session.user.id)
-      const [courses, announcements, allHomework] = await Promise.all([
-        getCourses({ userId, role: 'STUDENT' }),
-        getAnnouncements({ userId, role: 'STUDENT', limit: 3 }),
-        getHomework({ userId, role: 'STUDENT', studentId: student.id }),
-      ])
+    const userId = Number(session.user.id)
 
-      const coursesWithProgress = await Promise.all(
-        courses.map(async (c) => {
+    // Fetch independently so one failure does not hide the whole LMS section
+    const [coursesResult, announcementsResult, homeworkResult] = await Promise.allSettled([
+      getCourses({ userId, role: 'STUDENT' }),
+      getAnnouncements({ userId, role: 'STUDENT', limit: 3 }),
+      getHomework({ userId, role: 'STUDENT', studentId: student.id }),
+    ])
+
+    const courses = coursesResult.status === 'fulfilled' ? coursesResult.value : []
+    const announcements =
+      announcementsResult.status === 'fulfilled' ? announcementsResult.value : []
+    const allHomework = homeworkResult.status === 'fulfilled' ? homeworkResult.value : []
+
+    const coursesWithProgress = await Promise.all(
+      courses.map(async (c) => {
+        try {
           const progress = await getStudentProgress(c.id, student.id, userId, 'STUDENT')
           return { ...c, progress }
-        })
-      )
-
-      const todayHomework = allHomework.filter((hw) => {
-        const due = new Date(hw.dueDate)
-        return isToday(due) || (isPast(due) && !hw.isDone)
+        } catch {
+          return {
+            ...c,
+            progress: { completedLessons: 0, totalLessons: 0, completionPercentage: 0 },
+          }
+        }
       })
+    )
 
-      lmsData = { courses: coursesWithProgress, announcements, homework: todayHomework }
-    } catch {
-      lmsData = null
-    }
+    const todayHomework = allHomework.filter((hw) => {
+      const due = new Date(hw.dueDate)
+      return isToday(due) || (isPast(due) && !hw.isDone)
+    })
+
+    lmsData = { courses: coursesWithProgress, announcements, homework: todayHomework }
   }
 
   return (
