@@ -15,11 +15,10 @@ type Filter = 'all' | 'today' | 'upcoming' | 'overdue' | 'completed'
 
 export default function StudentHomeworkClient({
   homework: initial,
-  studentId,
   userId,
 }: {
   homework: Homework[]
-  studentId: number
+  studentId?: number
   userId: number
 }) {
   const [homework, setHomework] = useState(initial)
@@ -42,10 +41,10 @@ export default function StudentHomeworkClient({
     setLoading(id)
     try {
       if (isDone) {
-        await unmarkHomeworkDone(id, studentId, userId)
+        await unmarkHomeworkDone(id, userId)
         setHomework((prev) => prev.map((h) => h.id === id ? { ...h, isDone: false } : h))
       } else {
-        await markHomeworkDone(id, studentId, userId)
+        await markHomeworkDone(id, userId)
         setHomework((prev) => prev.map((h) => h.id === id ? { ...h, isDone: true } : h))
       }
     } catch (e) {

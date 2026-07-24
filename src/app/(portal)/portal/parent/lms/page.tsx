@@ -53,7 +53,7 @@ export default async function ParentLMSOverviewPage({
       id: c.id,
       title: c.title,
       subject: c.subject,
-      progress: await getStudentProgress(c.id, student.id),
+      progress: await getStudentProgress(c.id, student.id, userId, 'PARENT'),
     }))
   )
 

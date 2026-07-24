@@ -26,7 +26,7 @@ export default async function StudentCoursesPage() {
   const coursesWithProgress = await Promise.all(
     courses.map(async (c) => ({
       ...c,
-      progress: await getStudentProgress(c.id, student.id),
+      progress: await getStudentProgress(c.id, student.id, Number(session.user.id), 'STUDENT'),
     }))
   )
 

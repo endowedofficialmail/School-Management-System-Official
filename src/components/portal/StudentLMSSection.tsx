@@ -136,11 +136,10 @@ export default function StudentLMSSection({
 
 function HomeworkToggle({
   hw,
-  studentId,
   userId,
 }: {
   hw: Homework
-  studentId: number
+  studentId?: number
   userId: number
 }) {
   const [done, setDone] = useState(hw.isDone)
@@ -150,10 +149,10 @@ function HomeworkToggle({
     setLoading(true)
     try {
       if (done) {
-        await unmarkHomeworkDone(hw.id, studentId, userId)
+        await unmarkHomeworkDone(hw.id, userId)
         setDone(false)
       } else {
-        await markHomeworkDone(hw.id, studentId, userId)
+        await markHomeworkDone(hw.id, userId)
         setDone(true)
       }
     } catch (e) {

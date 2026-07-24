@@ -17,13 +17,12 @@ export default function StudentCourseClient({
   course,
   progress,
   completedLessonIds: initialCompleted,
-  studentId,
   userId,
 }: {
   course: Course
   progress: Progress
   completedLessonIds: number[]
-  studentId: number
+  studentId?: number
   userId: number
 }) {
   const [selectedLessonId, setSelectedLessonId] = useState<number | null>(
@@ -38,7 +37,7 @@ export default function StudentCourseClient({
   async function handleMarkComplete(lessonId: number) {
     setMarking(true)
     try {
-      await markLessonComplete(lessonId, studentId, userId)
+      await markLessonComplete(lessonId, userId)
       setCompleted((prev) => new Set([...Array.from(prev), lessonId]))
       toast.success('Lesson marked as complete')
     } catch (e) {

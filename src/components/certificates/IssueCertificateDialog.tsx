@@ -409,12 +409,28 @@ export default function IssueCertificateDialog({
               Certificate issued successfully
             </div>
             <p className="mt-2 text-emerald-800">Certificate Number: <span className="font-mono">{issuedNumber}</span></p>
-            <div className="mt-4 flex gap-2">
-              <Button
-                onClick={() => issuedId && window.open(`/print/certificate/${issuedId}`, '_blank')}
-              >
-                Print Now
-              </Button>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {form.type === 'SCHOOL_LEAVING' ? (
+                <>
+                  <Button
+                    onClick={() => issuedId && window.open(`/print/certificate/${issuedId}?style=digital`, '_blank')}
+                  >
+                    Print — Digital
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => issuedId && window.open(`/print/certificate/${issuedId}?style=template`, '_blank')}
+                  >
+                    Print — Template
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  onClick={() => issuedId && window.open(`/print/certificate/${issuedId}`, '_blank')}
+                >
+                  Print Now
+                </Button>
+              )}
               <Button variant="outline" onClick={() => onOpenChange(false)}>
                 Done
               </Button>

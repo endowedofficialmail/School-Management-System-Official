@@ -111,14 +111,33 @@ export default function StudentCertificatesTab({ studentId, userId, role }: Prop
                   <td className="px-3 py-2">{r.issuedBy.name}</td>
                   <td className="px-3 py-2">{statusBadge(r.status)}</td>
                   <td className="px-3 py-2 text-right">
-                    <div className="inline-flex gap-2">
-                      <button
-                        className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8')}
-                        onClick={() => window.open(`/print/certificate/${r.id}`, '_blank')}
-                      >
-                        <Printer className="h-3.5 w-3.5 mr-1" />
-                        Print
-                      </button>
+                    <div className="inline-flex flex-wrap justify-end gap-2">
+                      {r.type === 'SCHOOL_LEAVING' ? (
+                        <>
+                          <button
+                            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8')}
+                            onClick={() => window.open(`/print/certificate/${r.id}?style=digital`, '_blank')}
+                          >
+                            <Printer className="h-3.5 w-3.5 mr-1" />
+                            Digital
+                          </button>
+                          <button
+                            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8')}
+                            onClick={() => window.open(`/print/certificate/${r.id}?style=template`, '_blank')}
+                          >
+                            <Printer className="h-3.5 w-3.5 mr-1" />
+                            Template
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8')}
+                          onClick={() => window.open(`/print/certificate/${r.id}`, '_blank')}
+                        >
+                          <Printer className="h-3.5 w-3.5 mr-1" />
+                          Print
+                        </button>
+                      )}
                       {role === 'ADMIN' && r.status === 'ISSUED' && (
                         <button
                           className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 text-red-600')}

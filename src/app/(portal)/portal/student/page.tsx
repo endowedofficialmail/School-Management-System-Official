@@ -54,7 +54,7 @@ export default async function StudentPortalPage() {
 
       const coursesWithProgress = await Promise.all(
         courses.map(async (c) => {
-          const progress = await getStudentProgress(c.id, student.id)
+          const progress = await getStudentProgress(c.id, student.id, userId, 'STUDENT')
           return { ...c, progress }
         })
       )

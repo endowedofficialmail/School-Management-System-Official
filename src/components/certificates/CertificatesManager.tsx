@@ -196,10 +196,21 @@ export default function CertificatesManager({ role, userId }: Props) {
                       <DropdownMenuTrigger className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-8 w-8 p-0')}>
                         <MoreHorizontal className="h-4 w-4" />
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-48">
-                        <DropdownMenuItem onClick={() => window.open(`/print/certificate/${r.id}`, '_blank')}>
-                          Print Certificate
-                        </DropdownMenuItem>
+                      <DropdownMenuContent align="end" className="w-56">
+                        {r.type === 'SCHOOL_LEAVING' ? (
+                          <>
+                            <DropdownMenuItem onClick={() => window.open(`/print/certificate/${r.id}?style=digital`, '_blank')}>
+                              Print — Digital (Filled)
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => window.open(`/print/certificate/${r.id}?style=template`, '_blank')}>
+                              Print — Template (Blank Lines)
+                            </DropdownMenuItem>
+                          </>
+                        ) : (
+                          <DropdownMenuItem onClick={() => window.open(`/print/certificate/${r.id}`, '_blank')}>
+                            Print Certificate
+                          </DropdownMenuItem>
+                        )}
                         {role === 'ADMIN' && r.status === 'ISSUED' && (
                           <DropdownMenuItem onClick={() => onRevoke(r.id)}>
                             Revoke

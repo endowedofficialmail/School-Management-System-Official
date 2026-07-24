@@ -7,7 +7,6 @@ import { prisma } from '@/lib/prisma'
 import { authOptions } from '@/lib/auth'
 import {
   requireParentChildLink,
-  requireStudentSelf,
 } from '@/lib/security'
 
 const SCHOOL_ID = 1
@@ -37,22 +36,44 @@ async function verifyTeacherOwnership(courseId: number, teacherId: number, role:
   }
 }
 
-async function verifyStudentCourseAccess(courseId: number, studentId: number) {
+/** Class-based access: student sees a course iff student.classId === course.classId and it is published. */
+async function verifyStudentCourseAccess(courseId: number, userId: number) {
   const course = await prisma.course.findUnique({
     where: { id: courseId },
-    include: {
-      class: {
-        include: {
-          students: { where: { id: studentId } },
-        },
-      },
-    },
+    select: { classId: true, isPublished: true },
   })
   if (!course) throw new Error('Course not found')
   if (!course.isPublished) throw new Error('This course is not yet published')
-  if (course.class.students.length === 0) {
-    throw new Error('Unauthorized: You are not enrolled in this class')
+
+  const profile = await prisma.studentPortalProfile.findUnique({
+    where: { userId },
+    include: { student: { select: { classId: true } } },
+  })
+  if (!profile) throw new Error('Student profile not found')
+
+  if (profile.student.classId !== course.classId) {
+    throw new Error('Unauthorized: This course is not for your class')
   }
+  return true
+}
+
+async function verifyStudentInCourseClass(courseId: number, studentId: number) {
+  const course = await prisma.course.findUnique({
+    where: { id: courseId },
+    select: { classId: true, isPublished: true },
+  })
+  if (!course) throw new Error('Course not found')
+  if (!course.isPublished) throw new Error('This course is not yet published')
+
+  const student = await prisma.student.findUnique({
+    where: { id: studentId },
+    select: { classId: true },
+  })
+  if (!student) throw new Error('Student not found')
+  if (student.classId !== course.classId) {
+    throw new Error('Unauthorized: This course is not for your class')
+  }
+  return true
 }
 
 async function verifyParentChildAccess(studentId: number, parentUserId: number) {
@@ -112,6 +133,25 @@ export async function toggleLMS(enabled: boolean) {
 
 // ─── Course actions ───────────────────────────────────────────────────────────
 
+const courseListInclude = {
+  subject: { select: { id: true, name: true } },
+  class: { select: { id: true, name: true, section: true } },
+  teacher: { select: { id: true, name: true } },
+  _count: { select: { lessons: true, homeworks: true } },
+} as const
+
+const studentCourseListInclude = {
+  subject: { select: { id: true, name: true } },
+  class: { select: { id: true, name: true, section: true } },
+  teacher: { select: { id: true, name: true } },
+  _count: {
+    select: {
+      lessons: { where: { isPublished: true } },
+      homeworks: true,
+    },
+  },
+} as const
+
 export async function getCourses(filters?: {
   classId?: number
   teacherId?: number
@@ -124,45 +164,69 @@ export async function getCourses(filters?: {
   const role = filters?.role
   const userId = filters?.userId
 
+  // Students see all published courses for their class — no enrollment/membership lists
+  if (role === 'STUDENT') {
+    if (!userId) throw new Error('User ID required')
+    const profile = await prisma.studentPortalProfile.findUnique({
+      where: { userId },
+      include: { student: { select: { classId: true } } },
+    })
+    if (!profile) throw new Error('Student profile not found')
+
+    return prisma.course.findMany({
+      where: {
+        classId: profile.student.classId,
+        isPublished: true,
+      },
+      include: studentCourseListInclude,
+      orderBy: { createdAt: 'desc' },
+    })
+  }
+
+  if (role === 'PARENT') {
+    if (!userId) throw new Error('User ID required')
+    const parent = await prisma.parent.findUnique({
+      where: { userId },
+      include: {
+        students: {
+          include: { student: { select: { classId: true } } },
+        },
+      },
+    })
+    if (!parent || parent.students.length === 0) {
+      throw new Error('No linked students found')
+    }
+
+    const targetStudentLink = filters?.studentId
+      ? parent.students.find((s) => s.studentId === filters.studentId)
+      : parent.students[0]
+    if (!targetStudentLink) throw new Error('Student not linked to this parent')
+
+    return prisma.course.findMany({
+      where: {
+        classId: targetStudentLink.student.classId,
+        isPublished: true,
+      },
+      include: studentCourseListInclude,
+      orderBy: { createdAt: 'desc' },
+    })
+  }
+
   const where: Record<string, unknown> = {}
   if (filters?.classId) where.classId = filters.classId
   if (filters?.isPublished !== undefined) where.isPublished = filters.isPublished
 
   if (role === 'TEACHER' && userId) {
     where.teacherId = userId
-  } else if (role === 'STUDENT' && userId) {
-    const profile = await prisma.studentPortalProfile.findUnique({
-      where: { userId },
-    })
-    if (!profile) throw new Error('Student profile not found')
-    where.classId = (
-      await prisma.student.findUnique({ where: { id: profile.studentId } })
-    )?.classId
-    where.isPublished = true
-  } else if (role === 'PARENT' && filters?.studentId) {
-    await verifyParentChildAccess(filters.studentId, userId!)
-    const student = await prisma.student.findUnique({
-      where: { id: filters.studentId },
-    })
-    if (!student) throw new Error('Student not found')
-    where.classId = student.classId
-    where.isPublished = true
-  } else {
-    if (filters?.teacherId) where.teacherId = filters.teacherId
+  } else if (filters?.teacherId) {
+    where.teacherId = filters.teacherId
   }
 
-  const courses = await prisma.course.findMany({
+  return prisma.course.findMany({
     where,
-    include: {
-      subject: { select: { id: true, name: true } },
-      class: { select: { id: true, name: true, section: true } },
-      teacher: { select: { id: true, name: true } },
-      _count: { select: { lessons: true, homeworks: true } },
-    },
+    include: courseListInclude,
     orderBy: { createdAt: 'desc' },
   })
-
-  return courses
 }
 
 export async function getCourseById(
@@ -194,11 +258,7 @@ export async function getCourseById(
     return course
   }
   if (role === 'STUDENT') {
-    const profile = await prisma.studentPortalProfile.findUnique({
-      where: { userId: requestingUserId },
-    })
-    if (!profile) throw new Error('Unauthorized')
-    await verifyStudentCourseAccess(courseId, profile.studentId)
+    await verifyStudentCourseAccess(courseId, requestingUserId)
     return {
       ...course,
       lessons: course.lessons.filter((l) => l.isPublished),
@@ -211,7 +271,7 @@ export async function getCourseById(
     })
     if (!parent || parent.students.length === 0) throw new Error('Unauthorized')
     const child = parent.students[0].student
-    await verifyStudentCourseAccess(courseId, child.id)
+    await verifyStudentInCourseClass(courseId, child.id)
     return {
       ...course,
       lessons: course.lessons.filter((l) => l.isPublished),
@@ -425,41 +485,81 @@ export async function reorderLessons(
   revalidateLMSPaths()
 }
 
-export async function markLessonComplete(
-  lessonId: number,
-  studentId: number,
-  userId: number
-) {
+export async function markLessonComplete(lessonId: number, userId: number) {
   await verifyLMSAccess()
-  await requireStudentSelf(studentId, userId)
 
-  const lesson = await prisma.lesson.findUnique({ where: { id: lessonId } })
+  const profile = await prisma.studentPortalProfile.findUnique({
+    where: { userId },
+    include: { student: { select: { classId: true, id: true } } },
+  })
+  if (!profile) throw new Error('Student profile not found')
+
+  const lesson = await prisma.lesson.findUnique({
+    where: { id: lessonId },
+    include: { course: { select: { classId: true, isPublished: true } } },
+  })
   if (!lesson) throw new Error('Lesson not found')
-  await verifyStudentCourseAccess(lesson.courseId, studentId)
+  if (!lesson.course.isPublished) throw new Error('Course not published')
+  if (lesson.course.classId !== profile.student.classId) {
+    throw new Error('Unauthorized: This lesson is not for your class')
+  }
+  if (!lesson.isPublished) throw new Error('This lesson is not published yet')
 
   const completion = await prisma.lessonCompletion.upsert({
-    where: { lessonId_studentId: { lessonId, studentId } },
+    where: {
+      lessonId_studentId: {
+        lessonId,
+        studentId: profile.student.id,
+      },
+    },
     update: { completedAt: new Date() },
-    create: { lessonId, studentId },
+    create: {
+      lessonId,
+      studentId: profile.student.id,
+      completedAt: new Date(),
+    },
   })
 
+  revalidatePath('/portal/student')
   revalidateLMSPaths()
   return completion
 }
 
-export async function getStudentProgress(courseId: number, studentId: number) {
+export async function getStudentProgress(
+  courseId: number,
+  studentId: number,
+  requestingUserId?: number,
+  role?: string
+) {
   await verifyLMSAccess()
+
+  if (role === 'STUDENT' && requestingUserId) {
+    const profile = await prisma.studentPortalProfile.findUnique({
+      where: { userId: requestingUserId },
+    })
+    if (!profile || profile.studentId !== studentId) {
+      throw new Error('Unauthorized')
+    }
+  }
+  if (role === 'PARENT' && requestingUserId) {
+    await requireParentChildLink(studentId, requestingUserId)
+  }
 
   const lessons = await prisma.lesson.findMany({
     where: { courseId, isPublished: true },
     orderBy: { order: 'asc' },
-    include: {
-      completions: { where: { studentId } },
+  })
+
+  const completions = await prisma.lessonCompletion.findMany({
+    where: {
+      lessonId: { in: lessons.map((l) => l.id) },
+      studentId,
     },
   })
 
+  const completedIds = new Set(completions.map((c) => c.lessonId))
   const totalLessons = lessons.length
-  const completedLessons = lessons.filter((l) => l.completions.length > 0).length
+  const completedLessons = completions.length
   const completionPercentage =
     totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0
 
@@ -467,12 +567,13 @@ export async function getStudentProgress(courseId: number, studentId: number) {
     totalLessons,
     completedLessons,
     completionPercentage,
-    lessons: lessons.map((l) => ({
-      id: l.id,
-      title: l.title,
-      order: l.order,
-      completed: l.completions.length > 0,
-      completedAt: l.completions[0]?.completedAt ?? null,
+    lessons: lessons.map((lesson) => ({
+      id: lesson.id,
+      title: lesson.title,
+      order: lesson.order,
+      completed: completedIds.has(lesson.id),
+      completedAt:
+        completions.find((c) => c.lessonId === lesson.id)?.completedAt ?? null,
     })),
   }
 }
@@ -542,43 +643,100 @@ export async function getAnnouncements(filters: {
   await verifyLMSAccess()
 
   const { userId, role } = filters
-  const where: Record<string, unknown> = {}
-
-  if (filters.courseId) where.courseId = filters.courseId
-  if (filters.classId) where.classId = filters.classId
 
   if (role === 'STUDENT') {
     const profile = await prisma.studentPortalProfile.findUnique({
       where: { userId },
-      include: { student: true },
+      include: { student: { select: { classId: true } } },
     })
-    if (!profile) throw new Error('Unauthorized')
-    where.OR = [
-      { classId: profile.student.classId },
-      { course: { classId: profile.student.classId, isPublished: true } },
-      { classId: null, courseId: null },
-    ]
-  } else if (role === 'PARENT') {
-    if (!filters.studentId) throw new Error('Student ID required')
-    await verifyParentChildAccess(filters.studentId, userId)
+    if (!profile) throw new Error('Student profile not found')
+
+    const studentClassId = profile.student.classId
+    const courseIds = (
+      await prisma.course.findMany({
+        where: { classId: studentClassId, isPublished: true },
+        select: { id: true },
+      })
+    ).map((c) => c.id)
+
+    return prisma.announcement.findMany({
+      where: {
+        OR: [
+          { classId: null, courseId: null },
+          { classId: studentClassId },
+          ...(courseIds.length > 0 ? [{ courseId: { in: courseIds } }] : []),
+        ],
+      },
+      include: {
+        postedBy: { select: { id: true, name: true } },
+        course: { select: { id: true, title: true } },
+        class: { select: { id: true, name: true, section: true } },
+        readReceipts: { where: { userId } },
+        _count: { select: { readReceipts: true } },
+      },
+      orderBy: [{ isImportant: 'desc' }, { createdAt: 'desc' }],
+      take: filters.limit,
+    })
+  }
+
+  if (role === 'PARENT') {
+    const targetStudentId = filters.studentId
+    if (!targetStudentId) throw new Error('Student ID required')
+    await requireParentChildLink(targetStudentId, userId)
+
     const student = await prisma.student.findUnique({
-      where: { id: filters.studentId },
+      where: { id: targetStudentId },
+      select: { classId: true },
     })
     if (!student) throw new Error('Student not found')
-    where.OR = [
-      { classId: student.classId },
-      { course: { classId: student.classId, isPublished: true } },
-      { classId: null, courseId: null },
-    ]
-  } else if (role === 'TEACHER') {
+
+    const courseIds = (
+      await prisma.course.findMany({
+        where: { classId: student.classId, isPublished: true },
+        select: { id: true },
+      })
+    ).map((c) => c.id)
+
+    return prisma.announcement.findMany({
+      where: {
+        OR: [
+          { classId: null, courseId: null },
+          { classId: student.classId },
+          ...(courseIds.length > 0 ? [{ courseId: { in: courseIds } }] : []),
+        ],
+      },
+      include: {
+        postedBy: { select: { id: true, name: true } },
+        course: { select: { id: true, title: true } },
+        class: { select: { id: true, name: true, section: true } },
+        readReceipts: { where: { userId } },
+        _count: { select: { readReceipts: true } },
+      },
+      orderBy: [{ isImportant: 'desc' }, { createdAt: 'desc' }],
+      take: filters.limit,
+    })
+  }
+
+  const where: Record<string, unknown> = {}
+  if (filters.courseId) where.courseId = filters.courseId
+  if (filters.classId) where.classId = filters.classId
+
+  if (role === 'TEACHER') {
     where.OR = [
       { postedById: userId },
       { course: { teacherId: userId } },
-      { class: { OR: [{ classTeacherId: userId }, { subjects: { some: { teacherId: userId } } }] } },
+      {
+        class: {
+          OR: [
+            { classTeacherId: userId },
+            { subjects: { some: { teacherId: userId } } },
+          ],
+        },
+      },
     ]
   }
 
-  const announcements = await prisma.announcement.findMany({
+  return prisma.announcement.findMany({
     where,
     include: {
       postedBy: { select: { id: true, name: true } },
@@ -590,8 +748,6 @@ export async function getAnnouncements(filters: {
     orderBy: [{ isImportant: 'desc' }, { createdAt: 'desc' }],
     take: filters.limit,
   })
-
-  return announcements
 }
 
 export async function markAnnouncementRead(announcementId: number, userId: number) {
@@ -728,33 +884,103 @@ export async function getHomework(filters: {
   await verifyLMSAccess()
 
   const { userId, role } = filters
-  const courseWhere: Record<string, unknown> = {}
+  const now = new Date()
 
-  if (filters.courseId) courseWhere.id = filters.courseId
-  if (filters.classId) courseWhere.classId = filters.classId
+  function mapHomework<T extends {
+    dueDate: Date
+    completions: Array<{ studentId: number; isDone: boolean; markedAt: Date | null }>
+  }>(homeworks: T[], targetStudentId?: number) {
+    return homeworks.map((hw) => {
+      const dueDate = new Date(hw.dueDate)
+      const daysUntilDue = Math.ceil(
+        (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+      )
+      const studentCompletion = targetStudentId
+        ? hw.completions.find((c) => c.studentId === targetStudentId)
+        : null
+
+      return {
+        ...hw,
+        isOverdue: dueDate < now,
+        daysUntilDue,
+        isDone: studentCompletion?.isDone ?? false,
+        markedAt: studentCompletion?.markedAt ?? null,
+      }
+    })
+  }
 
   if (role === 'STUDENT') {
     const profile = await prisma.studentPortalProfile.findUnique({
       where: { userId },
-      include: { student: true },
+      include: { student: { select: { classId: true, id: true } } },
     })
-    if (!profile) throw new Error('Unauthorized')
-    courseWhere.classId = profile.student.classId
-    courseWhere.isPublished = true
-  } else if (role === 'PARENT') {
-    if (!filters.studentId) throw new Error('Student ID required')
-    await verifyParentChildAccess(filters.studentId, userId)
-    const student = await prisma.student.findUnique({
-      where: { id: filters.studentId },
+    if (!profile) throw new Error('Student profile not found')
+
+    const studentClassId = profile.student.classId
+    const studentId = profile.student.id
+
+    const homeworkList = await prisma.homework.findMany({
+      where: {
+        course: {
+          classId: studentClassId,
+          isPublished: true,
+        },
+      },
+      include: {
+        course: {
+          include: {
+            subject: { select: { name: true } },
+            class: { select: { id: true, name: true, section: true } },
+          },
+        },
+        completions: { where: { studentId } },
+        postedBy: { select: { name: true } },
+      },
+      orderBy: { dueDate: 'asc' },
     })
-    if (!student) throw new Error('Student not found')
-    courseWhere.classId = student.classId
-    courseWhere.isPublished = true
-  } else if (role === 'TEACHER') {
-    courseWhere.teacherId = userId
+
+    return mapHomework(homeworkList, studentId)
   }
 
-  const now = new Date()
+  if (role === 'PARENT') {
+    const targetStudentId = filters.studentId
+    if (!targetStudentId) throw new Error('Student ID required for parent access')
+    await requireParentChildLink(targetStudentId, userId)
+
+    const student = await prisma.student.findUnique({
+      where: { id: targetStudentId },
+      select: { classId: true },
+    })
+    if (!student) throw new Error('Student not found')
+
+    const homeworkList = await prisma.homework.findMany({
+      where: {
+        course: {
+          classId: student.classId,
+          isPublished: true,
+        },
+      },
+      include: {
+        course: {
+          include: {
+            subject: { select: { name: true } },
+            class: { select: { id: true, name: true, section: true } },
+          },
+        },
+        completions: { where: { studentId: targetStudentId } },
+        postedBy: { select: { name: true } },
+      },
+      orderBy: { dueDate: 'asc' },
+    })
+
+    return mapHomework(homeworkList, targetStudentId)
+  }
+
+  const courseWhere: Record<string, unknown> = {}
+  if (filters.courseId) courseWhere.id = filters.courseId
+  if (filters.classId) courseWhere.classId = filters.classId
+  if (role === 'TEACHER') courseWhere.teacherId = userId
+
   const homeworks = await prisma.homework.findMany({
     where: { course: courseWhere },
     include: {
@@ -772,25 +998,7 @@ export async function getHomework(filters: {
     orderBy: { dueDate: 'asc' },
   })
 
-  return homeworks.map((hw) => {
-    const dueDate = new Date(hw.dueDate)
-    const daysUntilDue = Math.ceil(
-      (dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-    )
-    const studentCompletion = Array.isArray(hw.completions)
-      ? hw.completions.find(
-          (c) => 'studentId' in c && c.studentId === filters.studentId
-        )
-      : null
-
-    return {
-      ...hw,
-      isOverdue: dueDate < now,
-      daysUntilDue,
-      isDone: studentCompletion?.isDone ?? false,
-      markedAt: studentCompletion?.markedAt ?? null,
-    }
-  })
+  return mapHomework(homeworks, filters.studentId)
 }
 
 export async function updateHomework(
@@ -828,38 +1036,79 @@ export async function deleteHomework(homeworkId: number, userId: number, role: s
   revalidateLMSPaths()
 }
 
-export async function markHomeworkDone(
-  homeworkId: number,
-  studentId: number,
-  userId: number
-) {
+export async function markHomeworkDone(homeworkId: number, userId: number) {
   await verifyLMSAccess()
-  await requireStudentSelf(studentId, userId)
+
+  const profile = await prisma.studentPortalProfile.findUnique({
+    where: { userId },
+    include: { student: { select: { classId: true, id: true } } },
+  })
+  if (!profile) throw new Error('Student profile not found')
+
+  const homework = await prisma.homework.findUnique({
+    where: { id: homeworkId },
+    include: { course: { select: { classId: true, isPublished: true } } },
+  })
+  if (!homework) throw new Error('Homework not found')
+  if (homework.course.classId !== profile.student.classId) {
+    throw new Error('Unauthorized')
+  }
 
   const completion = await prisma.homeworkCompletion.upsert({
-    where: { homeworkId_studentId: { homeworkId, studentId } },
+    where: {
+      homeworkId_studentId: {
+        homeworkId,
+        studentId: profile.student.id,
+      },
+    },
     update: { isDone: true, markedAt: new Date() },
-    create: { homeworkId, studentId, isDone: true, markedAt: new Date() },
+    create: {
+      homeworkId,
+      studentId: profile.student.id,
+      isDone: true,
+      markedAt: new Date(),
+    },
   })
 
+  revalidatePath('/portal/student')
   revalidateLMSPaths()
   return completion
 }
 
-export async function unmarkHomeworkDone(
-  homeworkId: number,
-  studentId: number,
-  userId: number
-) {
+export async function unmarkHomeworkDone(homeworkId: number, userId: number) {
   await verifyLMSAccess()
-  await requireStudentSelf(studentId, userId)
+
+  const profile = await prisma.studentPortalProfile.findUnique({
+    where: { userId },
+    include: { student: { select: { classId: true, id: true } } },
+  })
+  if (!profile) throw new Error('Student profile not found')
+
+  const homework = await prisma.homework.findUnique({
+    where: { id: homeworkId },
+    include: { course: { select: { classId: true, isPublished: true } } },
+  })
+  if (!homework) throw new Error('Homework not found')
+  if (homework.course.classId !== profile.student.classId) {
+    throw new Error('Unauthorized')
+  }
 
   const completion = await prisma.homeworkCompletion.upsert({
-    where: { homeworkId_studentId: { homeworkId, studentId } },
+    where: {
+      homeworkId_studentId: {
+        homeworkId,
+        studentId: profile.student.id,
+      },
+    },
     update: { isDone: false, markedAt: null },
-    create: { homeworkId, studentId, isDone: false },
+    create: {
+      homeworkId,
+      studentId: profile.student.id,
+      isDone: false,
+    },
   })
 
+  revalidatePath('/portal/student')
   revalidateLMSPaths()
   return completion
 }
@@ -1074,4 +1323,4 @@ export async function getTeachers() {
   })
 }
 
-export { verifyStudentCourseAccess, verifyParentChildAccess }
+export { verifyStudentCourseAccess, verifyStudentInCourseClass, verifyParentChildAccess }

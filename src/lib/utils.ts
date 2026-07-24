@@ -17,6 +17,39 @@ export function formatCurrency(amount: number | string): string {
   })}`
 }
 
+export function dateToWords(date: Date): string {
+  const day = date.getDate()
+  const month = date.toLocaleString('en-US', { month: 'long' })
+  const year = date.getFullYear()
+
+  const ones = [
+    '', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
+    'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
+    'Seventeen', 'Eighteen', 'Nineteen', 'Twenty', 'Twenty One', 'Twenty Two',
+    'Twenty Three', 'Twenty Four', 'Twenty Five', 'Twenty Six', 'Twenty Seven',
+    'Twenty Eight', 'Twenty Nine', 'Thirty', 'Thirty One',
+  ]
+
+  const yearToWords = (y: number): string => {
+    if (y >= 2000 && y <= 2099) {
+      const remainder = y - 2000
+      if (remainder === 0) return 'Two Thousand'
+      return `Two Thousand and ${ones[remainder]}`
+    }
+    return y.toString()
+  }
+
+  return `${ones[day]}, ${month} ${yearToWords(year)}`
+}
+
+export function getDateWithDayName(date: Date): string {
+  const dayName = date.toLocaleString('en-US', { weekday: 'long' })
+  const day = date.getDate()
+  const month = date.toLocaleString('en-US', { month: 'long' })
+  const year = date.getFullYear()
+  return `${dayName}, ${month} ${day}, ${year}`
+}
+
 export function compressAndConvertToBase64(
   file: File,
   maxWidth = 400,

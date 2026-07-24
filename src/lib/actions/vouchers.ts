@@ -56,41 +56,98 @@ export async function getVouchers(filters?: {
   })
 }
 
+export async function getPreviousFeeSummary(
+  studentId: number,
+  currentMonth: number,
+  currentYear: number
+) {
+  const months: { month: number; year: number }[] = []
+  let m = currentMonth - 1
+  let y = currentYear
+
+  for (let i = 0; i < 12; i++) {
+    if (m === 0) {
+      m = 12
+      y--
+    }
+    months.push({ month: m, year: y })
+    m--
+  }
+
+  const summary = await Promise.all(
+    months.reverse().map(async ({ month, year }) => {
+      const voucher = await prisma.feeVoucher.findFirst({
+        where: { studentId, month, year },
+      })
+
+      const monthName = new Date(year, month - 1)
+        .toLocaleString('en-US', { month: 'short' })
+        .toUpperCase()
+      const yearShort = year.toString().slice(-2)
+
+      const paid = voucher ? Number(voucher.paidAmount) : 0
+      const remaining = voucher ? Number(voucher.remainingAmount) : 0
+
+      return {
+        label: `${monthName}-${yearShort}`,
+        labelLong: `${monthName}-${year}`,
+        paid,
+        arrear: remaining > 0 ? remaining : 0,
+      }
+    })
+  )
+
+  return summary
+}
+
 export async function getVoucherById(id: number) {
-  return prisma.feeVoucher.findUnique({
-    where: { id },
-    include: {
-      student: {
-        include: {
-          class: { select: { id: true, name: true, section: true } },
+  return prisma.feeVoucher
+    .findUnique({
+      where: { id },
+      include: {
+        student: {
+          include: {
+            class: { select: { id: true, name: true, section: true } },
+          },
         },
+        items: { orderBy: { createdAt: 'asc' } },
+        paymentHistory: { orderBy: { createdAt: 'asc' } },
       },
-      items: { orderBy: { createdAt: 'asc' } },
-      paymentHistory: { orderBy: { createdAt: 'asc' } },
-    },
-  }).then(async (v) => {
-    if (!v) return null
-    const school = await prisma.school.findFirst()
-    return { ...v, school }
-  })
+    })
+    .then(async (v) => {
+      if (!v) return null
+      const [school, previousFeeSummary] = await Promise.all([
+        prisma.school.findFirst(),
+        getPreviousFeeSummary(v.studentId, v.month, v.year),
+      ])
+      return { ...v, school, previousFeeSummary }
+    })
 }
 
 export async function getVouchersByClass(classId: number, month: number, year: number) {
-  return prisma.feeVoucher.findMany({
-    where: { month, year, student: { classId } },
-    include: {
-      student: {
-        include: {
-          class: { select: { id: true, name: true, section: true } },
+  return prisma.feeVoucher
+    .findMany({
+      where: { month, year, student: { classId } },
+      include: {
+        student: {
+          include: {
+            class: { select: { id: true, name: true, section: true } },
+          },
         },
+        items: { orderBy: { createdAt: 'asc' } },
       },
-      items: { orderBy: { createdAt: 'asc' } },
-    },
-    orderBy: { student: { firstName: 'asc' } },
-  }).then(async (vouchers) => {
-    const school = await prisma.school.findFirst()
-    return { vouchers, school }
-  })
+      orderBy: { student: { firstName: 'asc' } },
+    })
+    .then(async (vouchers) => {
+      const school = await prisma.school.findFirst()
+      const withSummary = await Promise.all(
+        vouchers.map(async (v) => ({
+          ...v,
+          previousFeeSummary: await getPreviousFeeSummary(v.studentId, v.month, v.year),
+        }))
+      )
+      return { vouchers: withSummary, school }
+    })
 }
 
 export async function getVoucherDashboardStats(month: number, year: number) {

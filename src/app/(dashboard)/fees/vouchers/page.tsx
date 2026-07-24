@@ -452,15 +452,23 @@ export default function FeeVouchersPage() {
       </div>
 
       {lastGeneratedClass && (
-        <div className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
           <span className="text-emerald-800">Vouchers generated successfully.</span>
           <Link
-            href={`/print/voucher/class/${lastGeneratedClass.classId}/${lastGeneratedClass.month}/${lastGeneratedClass.year}`}
+            href={`/print/voucher/class/${lastGeneratedClass.classId}/${lastGeneratedClass.month}/${lastGeneratedClass.year}?style=simple`}
             target="_blank"
             className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'gap-2 border-emerald-300 text-emerald-800')}
           >
             <Printer className="h-3.5 w-3.5" />
-            Print All Vouchers
+            Print All — Simple
+          </Link>
+          <Link
+            href={`/print/voucher/class/${lastGeneratedClass.classId}/${lastGeneratedClass.month}/${lastGeneratedClass.year}?style=bank`}
+            target="_blank"
+            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'gap-2 border-emerald-300 text-emerald-800')}
+          >
+            <Printer className="h-3.5 w-3.5" />
+            Print All — Bank Challan
           </Link>
         </div>
       )}
@@ -528,13 +536,20 @@ export default function FeeVouchersPage() {
                       <DropdownMenuTrigger className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-8 w-8 p-0')}>
                         <MoreHorizontal className="h-4 w-4" />
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-48">
+                      <DropdownMenuContent align="end" className="w-56">
                         <DropdownMenuItem
                           className="flex items-center gap-2 cursor-pointer"
-                          onClick={() => window.open(`/print/voucher/${v.id}`, '_blank')}
+                          onClick={() => window.open(`/print/voucher/${v.id}?style=simple`, '_blank')}
                         >
                           <Printer className="h-4 w-4" />
-                          Print Voucher
+                          Print — Simple (2 Copy)
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className="flex items-center gap-2 cursor-pointer"
+                          onClick={() => window.open(`/print/voucher/${v.id}?style=bank`, '_blank')}
+                        >
+                          <Printer className="h-4 w-4" />
+                          Print — Bank Challan (3 Copy)
                         </DropdownMenuItem>
                         {(v.status === 'PAID' || v.status === 'PARTIAL' || v.status === 'ADVANCE') && (
                           <DropdownMenuItem
