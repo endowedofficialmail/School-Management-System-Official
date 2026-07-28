@@ -1,6 +1,6 @@
 import { getServerSession } from 'next-auth'
 import { redirect } from 'next/navigation'
-import { format, isToday, isPast } from 'date-fns'
+import { format, isToday, isPast, addDays, isBefore, isAfter } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import AttendanceCalendar from '@/components/portal/AttendanceCalendar'
@@ -13,6 +13,8 @@ import { getStudentAttendanceSummary, getStudentPortalData } from '@/lib/actions
 import {
   getLMSSettings, getCourses, getAnnouncements, getHomework, getStudentProgress,
 } from '@/lib/actions/lms'
+import { getStudentAssignments } from '@/lib/actions/assignments'
+import { getStudentQuizzes } from '@/lib/actions/quizzes'
 import { formatRs } from '@/components/vouchers/VoucherDocument'
 import { ordinal } from '@/lib/grade'
 
@@ -47,16 +49,22 @@ export default async function StudentPortalPage() {
     const userId = Number(session.user.id)
 
     // Fetch independently so one failure does not hide the whole LMS section
-    const [coursesResult, announcementsResult, homeworkResult] = await Promise.allSettled([
-      getCourses({ userId, role: 'STUDENT' }),
-      getAnnouncements({ userId, role: 'STUDENT', limit: 3 }),
-      getHomework({ userId, role: 'STUDENT', studentId: student.id }),
-    ])
+    const [coursesResult, announcementsResult, homeworkResult, assignmentsResult, quizzesResult] =
+      await Promise.allSettled([
+        getCourses({ userId, role: 'STUDENT' }),
+        getAnnouncements({ userId, role: 'STUDENT', limit: 3 }),
+        getHomework({ userId, role: 'STUDENT', studentId: student.id }),
+        getStudentAssignments(userId, 'STUDENT'),
+        getStudentQuizzes(userId, 'STUDENT'),
+      ])
 
     const courses = coursesResult.status === 'fulfilled' ? coursesResult.value : []
     const announcements =
       announcementsResult.status === 'fulfilled' ? announcementsResult.value : []
     const allHomework = homeworkResult.status === 'fulfilled' ? homeworkResult.value : []
+    const allAssignments =
+      assignmentsResult.status === 'fulfilled' ? assignmentsResult.value : []
+    const allQuizzes = quizzesResult.status === 'fulfilled' ? quizzesResult.value : []
 
     const coursesWithProgress = await Promise.all(
       courses.map(async (c) => {
@@ -77,7 +85,28 @@ export default async function StudentPortalPage() {
       return isToday(due) || (isPast(due) && !hw.isDone)
     })
 
-    lmsData = { courses: coursesWithProgress, announcements, homework: todayHomework }
+    const weekAhead = addDays(now, 7)
+    const pendingAssignments = allAssignments
+      .filter((a) => !a.mySubmission && isBefore(new Date(a.dueDate), weekAhead))
+      .slice(0, 3)
+
+    const threeDays = addDays(now, 3)
+    const upcomingQuizzes = allQuizzes
+      .filter((q) => {
+        if (q.attemptStatus === 'COMPLETED') return false
+        if (q.startTime && isAfter(new Date(q.startTime), threeDays)) return false
+        if (q.endTime && isBefore(new Date(q.endTime), now)) return false
+        return true
+      })
+      .slice(0, 3)
+
+    lmsData = {
+      courses: coursesWithProgress,
+      announcements,
+      homework: todayHomework,
+      pendingAssignments,
+      upcomingQuizzes,
+    }
   }
 
   return (
@@ -118,6 +147,8 @@ export default async function StudentPortalPage() {
           courses={lmsData.courses}
           announcements={lmsData.announcements}
           homework={lmsData.homework}
+          pendingAssignments={lmsData.pendingAssignments}
+          upcomingQuizzes={lmsData.upcomingQuizzes}
           studentId={student.id}
           userId={Number(session.user.id)}
         />

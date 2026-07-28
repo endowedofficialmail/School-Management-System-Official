@@ -34,6 +34,18 @@ type LMSData = {
     total: number
     items: Array<{ id: number; title: string; isDone: boolean; course: { title: string } }>
   }
+  assignmentSummary?: {
+    pending: number
+    submitted: number
+    graded: number
+    recent: Array<{ id: number; title: string; marks: number; total: number }>
+  }
+  quizSummary?: {
+    attempted: number
+    notAttempted: number
+    avgScore: number | null
+    recent: Array<{ id: number; title: string; percentage: number; isPassed: boolean }>
+  }
 }
 
 export default function ParentPortalClient({
@@ -135,7 +147,9 @@ export default function ParentPortalClient({
           courses={lmsData.courses}
           announcements={lmsData.announcements}
           homeworkSummary={lmsData.homeworkSummary}
-          studentName={`${student.firstName} ${student.lastName}`}
+          assignmentSummary={lmsData.assignmentSummary}
+          quizSummary={lmsData.quizSummary}
+          studentName={`${selected.student.firstName} ${selected.student.lastName}`}
         />
       )}
 

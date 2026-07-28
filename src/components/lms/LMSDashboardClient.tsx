@@ -33,12 +33,32 @@ type TeacherStats = {
   }>
 }
 
+type PendingAssignment = {
+  assignmentId: number
+  title: string
+  courseId: number
+  courseTitle: string
+  pendingCount: number
+}
+
+type PendingQuiz = {
+  quizId: number
+  title: string
+  courseId: number
+  courseTitle: string
+  pendingCount: number
+}
+
 export default function LMSDashboardClient({
   role,
   stats,
+  pendingAssignments = [],
+  pendingQuizzes = [],
 }: {
   role: 'ADMIN' | 'TEACHER'
   stats: AdminStats | TeacherStats
+  pendingAssignments?: PendingAssignment[]
+  pendingQuizzes?: PendingQuiz[]
 }) {
   return (
     <div className="space-y-6">
@@ -51,6 +71,38 @@ export default function LMSDashboardClient({
           </p>
         </div>
       </div>
+
+      {(pendingAssignments.length > 0 || pendingQuizzes.length > 0) && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Pending Actions</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {pendingAssignments.map((a) => (
+              <Link
+                key={`a-${a.assignmentId}`}
+                href={`/lms/assignments/${a.assignmentId}/submissions`}
+                className="block rounded-lg border p-3 text-sm hover:bg-slate-50"
+              >
+                <span className="font-medium">{a.title}</span>
+                <span className="text-muted-foreground"> — {a.pendingCount} submission{a.pendingCount === 1 ? '' : 's'} waiting for grades</span>
+                <p className="text-xs text-muted-foreground mt-0.5">{a.courseTitle}</p>
+              </Link>
+            ))}
+            {pendingQuizzes.map((q) => (
+              <Link
+                key={`q-${q.quizId}`}
+                href={`/lms/quizzes/${q.quizId}/results`}
+                className="block rounded-lg border p-3 text-sm hover:bg-slate-50"
+              >
+                <span className="font-medium">{q.title}</span>
+                <span className="text-muted-foreground"> — {q.pendingCount} attempt{q.pendingCount === 1 ? '' : 's'} need review</span>
+                <p className="text-xs text-muted-foreground mt-0.5">{q.courseTitle}</p>
+              </Link>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {role === 'ADMIN' ? (
         <AdminDashboard stats={stats as AdminStats} />
@@ -86,14 +138,13 @@ function AdminDashboard({ stats }: { stats: AdminStats }) {
             <p className="text-sm text-muted-foreground">No announcements yet</p>
           ) : (
             stats.recentAnnouncements.map((a) => (
-              <div key={a.id} className="flex items-center justify-between border-b pb-2 last:border-0">
+              <div key={a.id} className="flex items-center justify-between rounded-lg border p-3">
                 <div>
                   <p className="font-medium text-sm">{a.title}</p>
-                  <p className="text-xs text-muted-foreground">by {a.postedBy.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {a.postedBy.name} · {format(new Date(a.createdAt), 'dd MMM yyyy')}
+                  </p>
                 </div>
-                <span className="text-xs text-muted-foreground">
-                  {format(new Date(a.createdAt), 'dd MMM yyyy')}
-                </span>
               </div>
             ))
           )}

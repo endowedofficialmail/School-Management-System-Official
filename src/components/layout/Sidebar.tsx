@@ -18,6 +18,7 @@ import {
   BookOpen,
   Bell,
   ClipboardList,
+  BookMarked,
 } from 'lucide-react'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
@@ -122,6 +123,12 @@ const lmsNavItems: NavItem[] = [
     title: 'Homework',
     href: '/lms/homework',
     icon: ClipboardList,
+    roles: ['ADMIN', 'TEACHER'],
+  },
+  {
+    title: 'Grade Book',
+    href: '/lms/gradebook',
+    icon: BookMarked,
     roles: ['ADMIN', 'TEACHER'],
   },
 ]

@@ -27,9 +27,13 @@ import {
   createAnnouncement,
 } from '@/lib/actions/lms'
 import { getLessonTypeBadges, getYouTubeThumbnail, isValidVideoUrl } from '@/lib/lms-utils'
+import CourseAssignmentsTab from '@/components/lms/CourseAssignmentsTab'
+import CourseQuizzesTab from '@/components/lms/CourseQuizzesTab'
 
 type Course = Awaited<ReturnType<typeof import('@/lib/actions/lms').getCourseById>>
 type ProgressStats = Awaited<ReturnType<typeof import('@/lib/actions/lms').getCourseCompletionStats>> | null
+type AssignmentRow = Awaited<ReturnType<typeof import('@/lib/actions/assignments').getAssignments>>[number]
+type QuizRow = Awaited<ReturnType<typeof import('@/lib/actions/quizzes').getQuizzes>>[number]
 
 const EMPTY_LESSON = { title: '', content: '', videoUrl: '', pdfUrl: '' }
 
@@ -39,12 +43,16 @@ export default function CourseDetailClient({
   userId,
   role,
   initialTab,
+  initialAssignments,
+  initialQuizzes,
 }: {
   course: Course
   progressStats: ProgressStats
   userId: number
   role: 'ADMIN' | 'TEACHER'
   initialTab: string
+  initialAssignments: AssignmentRow[]
+  initialQuizzes: QuizRow[]
 }) {
   const [course, setCourse] = useState(initialCourse)
   const [progressStats, setProgressStats] = useState(initialProgress)
@@ -235,6 +243,8 @@ export default function CourseDetailClient({
           <TabsTrigger value="lessons">Lessons</TabsTrigger>
           <TabsTrigger value="announcements">Announcements</TabsTrigger>
           <TabsTrigger value="homework">Homework</TabsTrigger>
+          <TabsTrigger value="assignments">Assignments</TabsTrigger>
+          <TabsTrigger value="quizzes">Quizzes</TabsTrigger>
           <TabsTrigger value="progress">Progress</TabsTrigger>
         </TabsList>
 
@@ -370,6 +380,24 @@ export default function CourseDetailClient({
               </Card>
             ))
           )}
+        </TabsContent>
+
+        <TabsContent value="assignments" className="mt-4">
+          <CourseAssignmentsTab
+            courseId={course.id}
+            userId={userId}
+            role={role}
+            initialAssignments={initialAssignments}
+          />
+        </TabsContent>
+
+        <TabsContent value="quizzes" className="mt-4">
+          <CourseQuizzesTab
+            courseId={course.id}
+            userId={userId}
+            role={role}
+            initialQuizzes={initialQuizzes}
+          />
         </TabsContent>
 
         <TabsContent value="progress" className="space-y-4 mt-4">

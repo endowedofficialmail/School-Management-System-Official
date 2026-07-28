@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { format, isToday } from 'date-fns'
-import { BookOpen, Bell, Check } from 'lucide-react'
+import { BookOpen, Bell, Check, FilePen, HelpCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -42,12 +42,27 @@ export default function StudentLMSSection({
   courses,
   announcements,
   homework,
+  pendingAssignments = [],
+  upcomingQuizzes = [],
   studentId,
   userId,
 }: {
   courses: Course[]
   announcements: Announcement[]
   homework: Homework[]
+  pendingAssignments?: Array<{
+    id: number
+    title: string
+    dueDate: Date
+    course: { title: string; subject: { name: string } }
+  }>
+  upcomingQuizzes?: Array<{
+    id: number
+    title: string
+    duration: number
+    course: { subject: { name: string } }
+    attemptStatus: string
+  }>
   studentId: number
   userId: number
 }) {
@@ -84,6 +99,62 @@ export default function StudentLMSSection({
                 )}
                 <Link href={`/portal/student/lms/courses/${c.id}`} className={cn(buttonVariants({ size: 'sm' }), 'inline-flex')}>
                   Continue Learning
+                </Link>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-sm">
+        <CardHeader className="pb-3 flex-row items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <FilePen className="h-4 w-4" /> Pending Assignments
+          </CardTitle>
+          <Link href="/portal/student/lms/assignments" className="text-xs text-primary">View All Assignments</Link>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {pendingAssignments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No pending assignments</p>
+          ) : (
+            pendingAssignments.map((a) => (
+              <div key={a.id} className="rounded-lg border p-3 flex items-center justify-between gap-2">
+                <div>
+                  <p className="font-medium text-sm">{a.title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {a.course.subject.name} · Due {format(new Date(a.dueDate), 'dd MMM, hh:mm a')}
+                  </p>
+                </div>
+                <Link href={`/portal/student/lms/assignments/${a.id}`} className={cn(buttonVariants({ size: 'sm' }), 'inline-flex')}>
+                  Submit
+                </Link>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-sm">
+        <CardHeader className="pb-3 flex-row items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <HelpCircle className="h-4 w-4" /> Upcoming Quizzes
+          </CardTitle>
+          <Link href="/portal/student/lms/quizzes" className="text-xs text-primary">View All Quizzes</Link>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {upcomingQuizzes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No upcoming quizzes</p>
+          ) : (
+            upcomingQuizzes.map((q) => (
+              <div key={q.id} className="rounded-lg border p-3 flex items-center justify-between gap-2">
+                <div>
+                  <p className="font-medium text-sm">{q.title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {q.course.subject.name} · {q.duration} min
+                  </p>
+                </div>
+                <Link href={`/portal/student/lms/quizzes/${q.id}/attempt`} className={cn(buttonVariants({ size: 'sm' }), 'inline-flex')}>
+                  {q.attemptStatus === 'IN_PROGRESS' ? 'Continue' : 'Start Quiz'}
                 </Link>
               </div>
             ))

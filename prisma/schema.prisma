@@ -83,6 +83,10 @@ model User {
   postedAnnouncements Announcement[] @relation("AnnouncementAuthor")
   postedHomeworks   Homework[] @relation("HomeworkAuthor")
   announcementReceipts AnnouncementReadReceipt[]
+  postedAssignments Assignment[] @relation("AssignmentAuthor")
+  gradedAssignments AssignmentSubmission[] @relation("AssignmentGrader")
+  postedQuizzes     Quiz[] @relation("QuizAuthor")
+  gradedQuizzes     QuizAttempt[] @relation("QuizGrader")
 }
 
 model School {
@@ -171,6 +175,8 @@ model Student {
   rollNumberSlips    RollNumberSlip[]
   lessonCompletions  LessonCompletion[]
   homeworkCompletions HomeworkCompletion[]
+  assignmentSubmissions AssignmentSubmission[]
+  quizAttempts       QuizAttempt[]
 
   @@index([classId])
   @@index([status])
@@ -586,6 +592,8 @@ model Course {
   lessons       Lesson[]
   announcements Announcement[]
   homeworks     Homework[]
+  assignments   Assignment[]
+  quizzes       Quiz[]
 
   @@unique([subjectId, classId])
 }
@@ -670,4 +678,163 @@ model HomeworkCompletion {
   markedAt   DateTime?
 
   @@unique([homeworkId, studentId])
+}
+
+// ─── LMS Phase 2 ─────────────────────────────────────────────────────────────
+
+enum SubmissionStatus {
+  SUBMITTED
+  GRADED
+  RETURNED
+  LATE
+}
+
+enum QuestionType {
+  MCQ
+  TRUE_FALSE
+  SHORT
+}
+
+model Assignment {
+  id           Int      @id @default(autoincrement())
+  course       Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId     Int
+  title        String
+  description  String?  @db.Text
+  instructions String?  @db.Text
+  fileUrl      String?
+  totalMarks   Decimal  @db.Decimal(5, 2) @default(100)
+  passingMarks Decimal  @db.Decimal(5, 2) @default(40)
+  dueDate      DateTime
+  allowLate    Boolean  @default(false)
+  isPublished  Boolean  @default(false)
+  postedBy     User     @relation("AssignmentAuthor", fields: [postedById], references: [id])
+  postedById   Int
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  submissions AssignmentSubmission[]
+
+  @@index([courseId])
+}
+
+model AssignmentSubmission {
+  id           Int              @id @default(autoincrement())
+  assignment   Assignment       @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  assignmentId Int
+  student      Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId    Int
+  textAnswer   String?          @db.Text
+  fileUrl      String?          @db.Text
+  fileName     String?
+  fileType     String?
+  fileSize     Int?
+  submittedAt  DateTime         @default(now())
+  isLate       Boolean          @default(false)
+  marksAwarded Decimal?         @db.Decimal(5, 2)
+  feedback     String?          @db.Text
+  gradedBy     User?            @relation("AssignmentGrader", fields: [gradedById], references: [id])
+  gradedById   Int?
+  gradedAt     DateTime?
+  status       SubmissionStatus @default(SUBMITTED)
+
+  @@unique([assignmentId, studentId])
+  @@index([studentId])
+}
+
+model Quiz {
+  id                     Int       @id @default(autoincrement())
+  course                 Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  courseId               Int
+  title                  String
+  description            String?   @db.Text
+  totalMarks             Decimal   @db.Decimal(5, 2) @default(100)
+  passingMarks           Decimal   @db.Decimal(5, 2) @default(40)
+  duration               Int
+  startTime              DateTime?
+  endTime                DateTime?
+  isPublished            Boolean   @default(false)
+  shuffleQuestions       Boolean   @default(false)
+  showResultsImmediately Boolean   @default(true)
+  allowedAttempts        Int       @default(1)
+  postedBy               User      @relation("QuizAuthor", fields: [postedById], references: [id])
+  postedById             Int
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  questions QuizQuestion[]
+  attempts  QuizAttempt[]
+
+  @@index([courseId])
+}
+
+model QuizQuestion {
+  id           Int          @id @default(autoincrement())
+  quiz         Quiz         @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  quizId       Int
+  questionText String       @db.Text
+  questionType QuestionType @default(MCQ)
+  marks        Decimal      @db.Decimal(4, 2) @default(1)
+  order        Int          @default(0)
+  explanation  String?      @db.Text
+
+  options QuizOption[]
+  answers QuizAnswer[]
+
+  @@index([quizId])
+}
+
+model QuizOption {
+  id         Int          @id @default(autoincrement())
+  question   QuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  questionId Int
+  optionText String
+  isCorrect  Boolean      @default(false)
+  order      Int          @default(0)
+
+  answers QuizAnswer[]
+
+  @@index([questionId])
+}
+
+model QuizAttempt {
+  id                 Int       @id @default(autoincrement())
+  quiz               Quiz      @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  quizId             Int
+  student            Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId          Int
+  startedAt          DateTime  @default(now())
+  submittedAt        DateTime?
+  timeSpent          Int?
+  isCompleted        Boolean   @default(false)
+  isTimedOut         Boolean   @default(false)
+  totalMarks         Decimal   @db.Decimal(5, 2) @default(0)
+  marksAwarded       Decimal   @db.Decimal(5, 2) @default(0)
+  percentage         Decimal   @db.Decimal(5, 2) @default(0)
+  isPassed           Boolean   @default(false)
+  manualMarksAwarded Decimal?  @db.Decimal(5, 2)
+  teacherFeedback    String?   @db.Text
+  gradedBy           User?     @relation("QuizGrader", fields: [gradedById], references: [id])
+  gradedById         Int?
+  gradedAt           DateTime?
+
+  answers QuizAnswer[]
+
+  @@unique([quizId, studentId])
+  @@index([studentId])
+}
+
+model QuizAnswer {
+  id               Int          @id @default(autoincrement())
+  attempt          QuizAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  attemptId        Int
+  question         QuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  questionId       Int
+  selectedOption   QuizOption?  @relation(fields: [selectedOptionId], references: [id])
+  selectedOptionId Int?
+  textAnswer       String?      @db.Text
+  isCorrect        Boolean?
+  marksAwarded     Decimal?     @db.Decimal(4, 2)
+
+  @@unique([attemptId, questionId])
 }

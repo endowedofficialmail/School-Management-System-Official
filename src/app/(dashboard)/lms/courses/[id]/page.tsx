@@ -2,6 +2,8 @@ import { getServerSession } from 'next-auth'
 import { redirect, notFound } from 'next/navigation'
 import { authOptions } from '@/lib/auth'
 import { getLMSSettings, getCourseById, getCourseCompletionStats } from '@/lib/actions/lms'
+import { getAssignments } from '@/lib/actions/assignments'
+import { getQuizzes } from '@/lib/actions/quizzes'
 import CourseDetailClient from '@/components/lms/CourseDetailClient'
 
 export default async function CourseDetailPage({
@@ -23,9 +25,11 @@ export default async function CourseDetailPage({
   const courseId = Number(params.id)
   if (isNaN(courseId)) notFound()
 
+  const userId = Number(session.user.id)
+
   let course
   try {
-    course = await getCourseById(courseId, Number(session.user.id), role)
+    course = await getCourseById(courseId, userId, role)
   } catch {
     return (
       <div className="rounded-xl border bg-white p-8 text-center">
@@ -35,20 +39,21 @@ export default async function CourseDetailPage({
     )
   }
 
-  let progressStats = null
-  try {
-    progressStats = await getCourseCompletionStats(courseId)
-  } catch {
-    progressStats = null
-  }
+  const [progressStats, assignments, quizzes] = await Promise.all([
+    getCourseCompletionStats(courseId).catch(() => null),
+    getAssignments(courseId, userId, role).catch(() => []),
+    getQuizzes(courseId, userId, role).catch(() => []),
+  ])
 
   return (
     <CourseDetailClient
       course={course}
       progressStats={progressStats}
-      userId={Number(session.user.id)}
+      userId={userId}
       role={role as 'ADMIN' | 'TEACHER'}
       initialTab={searchParams.tab ?? 'details'}
+      initialAssignments={assignments}
+      initialQuizzes={quizzes}
     />
   )
 }

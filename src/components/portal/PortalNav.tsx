@@ -2,17 +2,21 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { BookOpen, Bell, ClipboardList, GraduationCap } from 'lucide-react'
+import { BookOpen, Bell, ClipboardList, GraduationCap, FilePen, HelpCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const studentLinks = [
   { href: '/portal/student/lms/courses', label: 'My Courses', icon: BookOpen },
+  { href: '/portal/student/lms/assignments', label: 'Assignments', icon: FilePen },
+  { href: '/portal/student/lms/quizzes', label: 'Quizzes', icon: HelpCircle },
   { href: '/portal/student/lms/announcements', label: 'Announcements', icon: Bell },
   { href: '/portal/student/lms/homework', label: 'Homework', icon: ClipboardList },
 ]
 
 const parentLinks = [
   { href: '/portal/parent/lms', label: "My Child's Learning", icon: GraduationCap },
+  { href: '/portal/parent/lms/assignments', label: 'Assignments', icon: FilePen },
+  { href: '/portal/parent/lms/quizzes', label: 'Quizzes', icon: HelpCircle },
   { href: '/portal/parent/lms/announcements', label: 'Announcements', icon: Bell },
   { href: '/portal/parent/lms/homework', label: 'Homework', icon: ClipboardList },
 ]

@@ -31,11 +31,25 @@ export default function ParentLMSSection({
   courses,
   announcements,
   homeworkSummary,
+  assignmentSummary,
+  quizSummary,
   studentName,
 }: {
   courses: CourseProgress[]
   announcements: Announcement[]
   homeworkSummary: HomeworkSummary
+  assignmentSummary?: {
+    pending: number
+    submitted: number
+    graded: number
+    recent: Array<{ id: number; title: string; marks: number; total: number }>
+  }
+  quizSummary?: {
+    attempted: number
+    notAttempted: number
+    avgScore: number | null
+    recent: Array<{ id: number; title: string; percentage: number; isPassed: boolean }>
+  }
   studentName: string
 }) {
   const hwPct = homeworkSummary.total > 0
@@ -90,6 +104,57 @@ export default function ParentLMSSection({
                 <p className="text-xs text-muted-foreground">{a.postedBy.name} · {formatTimeAgo(new Date(a.createdAt))}</p>
               </div>
             ))
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3 flex-row items-center justify-between">
+          <CardTitle className="text-base">Assignments</CardTitle>
+          <Link href="/portal/parent/lms/assignments" className="text-xs text-primary">View Details</Link>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {assignmentSummary ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Pending: {assignmentSummary.pending} · Submitted: {assignmentSummary.submitted} · Graded: {assignmentSummary.graded}
+              </p>
+              {assignmentSummary.recent.map((a) => (
+                <div key={a.id} className="flex justify-between text-sm">
+                  <span>{a.title}</span>
+                  <Badge variant="outline">{a.marks}/{a.total}</Badge>
+                </div>
+              ))}
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">No assignment data</p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3 flex-row items-center justify-between">
+          <CardTitle className="text-base">Quizzes</CardTitle>
+          <Link href="/portal/parent/lms/quizzes" className="text-xs text-primary">View Details</Link>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {quizSummary ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Attempted: {quizSummary.attempted} · Not Attempted: {quizSummary.notAttempted}
+                {quizSummary.avgScore != null ? ` · Avg: ${quizSummary.avgScore}%` : ''}
+              </p>
+              {quizSummary.recent.map((q) => (
+                <div key={q.id} className="flex justify-between text-sm">
+                  <span>{q.title}</span>
+                  <Badge className={q.isPassed ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}>
+                    {q.percentage}%
+                  </Badge>
+                </div>
+              ))}
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">No quiz data</p>
           )}
         </CardContent>
       </Card>
