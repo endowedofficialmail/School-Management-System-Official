@@ -135,10 +135,11 @@ export default function QuizAttemptClient({
               return
             }
           } catch {
-            setError('This quiz has already been submitted. Results are not available yet.')
-            setLoading(false)
-            return
+            // ignore — fall through to "results not available" message
           }
+          setError('This quiz has already been submitted. Results are not available yet.')
+          setLoading(false)
+          return
         }
 
         if (quizData.questions.length === 0) {

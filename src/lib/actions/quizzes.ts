@@ -532,8 +532,20 @@ export async function getQuizById(quizId: number, userId: number, role: string) 
 }
 
 export async function getQuizForAttempt(quizId: number, userId: number) {
-  await verifyLMSAccess()
-  const student = await getStudentFromUser(userId)
+  // Return structured errors instead of throwing so Next.js doesn't turn
+  // server-action failures into 500 responses the client cannot handle.
+  try {
+    await verifyLMSAccess()
+  } catch {
+    return { error: 'LMS is not enabled' } as const
+  }
+
+  let student: Awaited<ReturnType<typeof getStudentFromUser>>
+  try {
+    student = await getStudentFromUser(userId)
+  } catch {
+    return { error: 'Student profile not found. Please contact the school office.' } as const
+  }
 
   const quiz = await prisma.quiz.findUnique({
     where: { id: quizId },
@@ -546,13 +558,19 @@ export async function getQuizForAttempt(quizId: number, userId: number) {
     },
   })
   if (!quiz || !quiz.isPublished || !quiz.course.isPublished) {
-    throw new Error('Quiz not found')
+    return { error: 'Quiz not found or not published.' } as const
   }
-  if (quiz.course.classId !== student.classId) throw new Error('Unauthorized')
+  if (quiz.course.classId !== student.classId) {
+    return { error: 'You are not enrolled in the class for this quiz.' } as const
+  }
 
   const now = new Date()
-  if (quiz.startTime && now < quiz.startTime) throw new Error('This quiz is not available yet')
-  if (quiz.endTime && now > quiz.endTime) throw new Error('This quiz has closed')
+  if (quiz.startTime && now < quiz.startTime) {
+    return { error: 'This quiz is not available yet.' } as const
+  }
+  if (quiz.endTime && now > quiz.endTime) {
+    return { error: 'This quiz has closed.' } as const
+  }
 
   const existing = await prisma.quizAttempt.findUnique({
     where: { quizId_studentId: { quizId, studentId: student.id } },
@@ -989,10 +1007,32 @@ export async function getQuizResults(quizId: number, userId: number, role: strin
   await verifyLMSAccess()
 
   if (role === 'STUDENT') {
-    const student = await getStudentFromUser(userId)
+    // For student UX we must never hard-fail here.
+    // When results aren't available (not completed yet / not released yet),
+    // we return `{ attempt: null }` so the client can continue safely.
+    let student: Awaited<ReturnType<typeof getStudentFromUser>> | null = null
+    try {
+      student = await getStudentFromUser(userId)
+    } catch {
+      return {
+        quiz: null,
+        attempt: null,
+      }
+    }
+
     const quiz = await prisma.quiz.findUnique({ where: { id: quizId } })
-    if (!quiz) throw new Error('Quiz not found')
-    if (!quiz.showResultsImmediately) throw new Error('Results are not available yet')
+    if (!quiz || !quiz.showResultsImmediately) {
+      return {
+        quiz: quiz
+          ? {
+              id: quiz.id,
+              title: quiz.title,
+              showResultsImmediately: quiz.showResultsImmediately,
+            }
+          : null,
+        attempt: null,
+      }
+    }
 
     const attempt = await prisma.quizAttempt.findUnique({
       where: { quizId_studentId: { quizId, studentId: student.id } },
@@ -1005,7 +1045,16 @@ export async function getQuizResults(quizId: number, userId: number, role: strin
         },
       },
     })
-    if (!attempt?.isCompleted) throw new Error('No completed attempt found')
+    if (!attempt?.isCompleted) {
+      return {
+        quiz: {
+          id: quiz.id,
+          title: quiz.title,
+          showResultsImmediately: quiz.showResultsImmediately,
+        },
+        attempt: null,
+      }
+    }
     return {
       quiz: {
         id: quiz.id,
