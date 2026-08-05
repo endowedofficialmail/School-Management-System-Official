@@ -104,7 +104,7 @@ export default function QuizAttemptClient({
 
         // Handle structured error from server action
         if ('error' in quizData) {
-          setError(quizData.error)
+          setError(quizData.error ?? 'Unable to load quiz.')
           setLoading(false)
           return
         }
