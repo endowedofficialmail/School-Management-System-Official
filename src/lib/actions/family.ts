@@ -9,12 +9,6 @@ function normalizeCNIC(cnic: string) {
   return cnic.replace(/[-\s]/g, '')
 }
 
-function formatCNIC(cnic: string) {
-  const clean = normalizeCNIC(cnic)
-  if (clean.length !== 13) return cnic
-  return `${clean.slice(0, 5)}-${clean.slice(5, 12)}-${clean.slice(12)}`
-}
-
 export async function generateFID() {
   const latest = await prisma.family.findFirst({
     orderBy: { fid: 'desc' },

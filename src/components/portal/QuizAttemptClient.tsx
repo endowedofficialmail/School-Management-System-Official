@@ -120,7 +120,7 @@ export default function QuizAttemptClient({
     return () => clearInterval(tick)
   }, [startedAt, quiz, result, handleSubmit])
 
-  const questions = quiz?.questions ?? []
+  const questions = useMemo(() => quiz?.questions ?? [], [quiz?.questions])
   const question = questions[current]
 
   async function persistAnswer(questionId: number, payload: { selectedOptionId?: number; textAnswer?: string }) {

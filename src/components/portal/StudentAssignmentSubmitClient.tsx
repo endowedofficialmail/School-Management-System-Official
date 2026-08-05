@@ -30,7 +30,7 @@ export default function StudentAssignmentSubmitClient({
   const [resubmit, setResubmit] = useState(false)
   const [localSubmission, setLocalSubmission] = useState(assignment.mySubmission)
 
-  const due = new Date(assignment.dueDate)
+  const due = useMemo(() => new Date(assignment.dueDate), [assignment.dueDate])
   const overdue = isPast(due)
   const countdown = useMemo(() => {
     if (overdue) {

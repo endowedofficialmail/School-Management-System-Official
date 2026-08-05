@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { Briefcase, FileText, LogOut, CheckCircle2 } from 'lucide-react'
-import { CertificateType } from '@prisma/client'
 import { toast } from 'sonner'
 
 import { issueTeacherLetter } from '@/lib/actions/certificates'
