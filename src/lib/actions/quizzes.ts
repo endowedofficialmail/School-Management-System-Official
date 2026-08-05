@@ -81,14 +81,10 @@ function serializeQuizRecord<
     passingMarks: Number(quiz.passingMarks),
     startTime: quiz.startTime ? new Date(quiz.startTime).toISOString() : null,
     endTime: quiz.endTime ? new Date(quiz.endTime).toISOString() : null,
-    ...(questions
-      ? {
-          questions: questions.map((q) => ({
-            ...q,
-            marks: Number(q.marks),
-          })),
-        }
-      : {}),
+    questions: (questions ?? []).map((q) => ({
+      ...q,
+      marks: Number(q.marks),
+    })),
   }
 }
 
