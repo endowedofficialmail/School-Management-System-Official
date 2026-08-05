@@ -22,8 +22,8 @@ type QuizRow = {
   duration: number
   totalMarks: unknown
   isPublished: boolean
-  startTime: Date | null
-  endTime: Date | null
+  startTime: string | Date | null
+  endTime: string | Date | null
   questionCount: number
   attemptCount?: number
   totalStudents?: number
@@ -97,7 +97,7 @@ export default function CourseQuizzesTab({
       toast.success('Quiz published')
       await refresh()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed')
+      toast.error(e instanceof Error ? e.message : 'Failed to publish quiz')
     }
   }
 
@@ -203,6 +203,9 @@ export default function CourseQuizzesTab({
                 <Input type="datetime-local" value={form.endTime} onChange={(e) => setForm({ ...form, endTime: e.target.value })} />
               </div>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Leave both dates empty to make the quiz available immediately after publishing.
+            </p>
             <div className="space-y-1.5">
               <Label>Allowed Attempts (1–3)</Label>
               <Input type="number" min={1} max={3} value={form.allowedAttempts} onChange={(e) => setForm({ ...form, allowedAttempts: e.target.value })} />

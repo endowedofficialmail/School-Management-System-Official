@@ -310,13 +310,15 @@ export default function QuestionManagerClient({
         {!quiz.isPublished && (
           <Button
             className="bg-emerald-600 hover:bg-emerald-700"
+            disabled={quiz.questions.length === 0}
             onClick={async () => {
               try {
-                await publishQuiz(quiz.id, userId, role)
+                const updated = await publishQuiz(quiz.id, userId, role)
+                setQuiz((prev) => ({ ...prev, isPublished: updated.isPublished }))
                 toast.success('Quiz published')
                 await refresh()
               } catch (e) {
-                toast.error(e instanceof Error ? e.message : 'Failed')
+                toast.error(e instanceof Error ? e.message : 'Failed to publish quiz')
               }
             }}
           >

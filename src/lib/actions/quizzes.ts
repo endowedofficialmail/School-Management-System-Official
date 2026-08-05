@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { prisma } from '@/lib/prisma'
 import { requireParentChildLink } from '@/lib/security'
+import { parseQuizDateTime } from '@/lib/utils'
 import type { QuestionType, Prisma } from '@prisma/client'
 
 const SCHOOL_ID = 1
@@ -64,6 +65,33 @@ function serializeQuizAttemptStart(attempt: { id: number; startedAt: Date }) {
   }
 }
 
+function serializeQuizRecord<
+  T extends {
+    totalMarks: unknown
+    passingMarks: unknown
+    startTime?: Date | null
+    endTime?: Date | null
+    questions?: Array<{ marks: unknown; [key: string]: unknown }>
+  },
+>(quiz: T) {
+  const { questions, ...rest } = quiz
+  return {
+    ...rest,
+    totalMarks: Number(quiz.totalMarks),
+    passingMarks: Number(quiz.passingMarks),
+    startTime: quiz.startTime ? new Date(quiz.startTime).toISOString() : null,
+    endTime: quiz.endTime ? new Date(quiz.endTime).toISOString() : null,
+    ...(questions
+      ? {
+          questions: questions.map((q) => ({
+            ...q,
+            marks: Number(q.marks),
+          })),
+        }
+      : {}),
+  }
+}
+
 async function recalculateQuizTotalMarks(quizId: number) {
   const questions = await prisma.quizQuestion.findMany({ where: { quizId } })
   const total = questions.reduce((sum, q) => sum + Number(q.marks), 0)
@@ -102,8 +130,8 @@ export async function createQuiz(
       totalMarks: data.totalMarks ?? 0,
       passingMarks: data.passingMarks ?? 40,
       duration: data.duration,
-      startTime: data.startTime ? new Date(data.startTime) : null,
-      endTime: data.endTime ? new Date(data.endTime) : null,
+      startTime: parseQuizDateTime(data.startTime),
+      endTime: parseQuizDateTime(data.endTime),
       shuffleQuestions: data.shuffleQuestions ?? false,
       showResultsImmediately: data.showResultsImmediately ?? true,
       allowedAttempts: Math.min(Math.max(data.allowedAttempts ?? 1, 1), 3),
@@ -113,7 +141,7 @@ export async function createQuiz(
   })
 
   revalidateQuizPaths(data.courseId)
-  return quiz
+  return serializeQuizRecord(quiz)
 }
 
 export async function updateQuiz(
@@ -147,10 +175,10 @@ export async function updateQuiz(
       ...(data.passingMarks !== undefined ? { passingMarks: data.passingMarks } : {}),
       ...(data.duration !== undefined ? { duration: data.duration } : {}),
       ...(data.startTime !== undefined
-        ? { startTime: data.startTime ? new Date(data.startTime) : null }
+        ? { startTime: parseQuizDateTime(data.startTime) }
         : {}),
       ...(data.endTime !== undefined
-        ? { endTime: data.endTime ? new Date(data.endTime) : null }
+        ? { endTime: parseQuizDateTime(data.endTime) }
         : {}),
       ...(data.shuffleQuestions !== undefined ? { shuffleQuestions: data.shuffleQuestions } : {}),
       ...(data.showResultsImmediately !== undefined
@@ -163,7 +191,7 @@ export async function updateQuiz(
   })
 
   revalidateQuizPaths(quiz.courseId)
-  return updated
+  return serializeQuizRecord(updated)
 }
 
 export async function addQuestion(
@@ -360,6 +388,10 @@ export async function publishQuiz(quizId: number, userId: number, role: string) 
   if (role !== 'ADMIN' && role !== 'TEACHER') throw new Error('Unauthorized')
   const quiz = await getQuizForTeacher(quizId, userId, role)
 
+  if (!quiz.course.isPublished) {
+    throw new Error('Publish the course first before publishing this quiz.')
+  }
+
   if (quiz.questions.length === 0) throw new Error('Quiz must have at least 1 question')
 
   for (const q of quiz.questions) {
@@ -377,7 +409,7 @@ export async function publishQuiz(quizId: number, userId: number, role: string) 
     data: { isPublished: true },
   })
   revalidateQuizPaths(quiz.courseId)
-  return updated
+  return serializeQuizRecord(updated)
 }
 
 export async function deleteQuiz(quizId: number, userId: number, role: string) {
@@ -460,7 +492,7 @@ export async function getQuizzes(courseId: number, userId: number, role: string,
   })
 
   return quizzes.map((q) => ({
-    ...q,
+    ...serializeQuizRecord(q),
     questionCount: q._count.questions,
     attemptCount: q.attempts.length,
     totalStudents: course.class._count.students,
@@ -528,7 +560,7 @@ export async function getQuizById(quizId: number, userId: number, role: string) 
   })
   if (!quiz) throw new Error('Quiz not found')
   await verifyTeacherOwnership(quiz.courseId, userId, role)
-  return quiz
+  return serializeQuizRecord(quiz)
 }
 
 export async function getQuizForAttempt(quizId: number, userId: number) {

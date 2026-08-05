@@ -56,6 +56,32 @@ export function getDateWithDayName(date: Date): string {
   return `${dayName}, ${month} ${day}, ${year}`
 }
 
+/** School timezone offset (Pakistan, UTC+5). Used for datetime-local inputs. */
+const SCHOOL_UTC_OFFSET_HOURS = 5
+
+/**
+ * Parse a datetime-local value (YYYY-MM-DDTHH:mm) as school wall-clock time.
+ * Vercel runs in UTC; without this, "2:00 PM" local is stored as 2:00 PM UTC.
+ */
+export function parseSchoolDateTimeLocal(value: string): Date {
+  const [datePart, timePart = '00:00'] = value.trim().split('T')
+  const [y, m, d] = datePart.split('-').map(Number)
+  const [hh, mm] = timePart.split(':').map(Number)
+  return new Date(Date.UTC(y, m - 1, d, hh - SCHOOL_UTC_OFFSET_HOURS, mm || 0, 0, 0))
+}
+
+export function parseQuizDateTime(value: Date | string | null | undefined): Date | null {
+  if (!value) return null
+  if (value instanceof Date) return value
+  const s = String(value).trim()
+  if (!s) return null
+  // datetime-local from browser: no timezone suffix
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) {
+    return parseSchoolDateTimeLocal(s)
+  }
+  return new Date(s)
+}
+
 export function compressAndConvertToBase64(
   file: File,
   maxWidth = 400,
