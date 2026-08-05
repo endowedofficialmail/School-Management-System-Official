@@ -56,6 +56,14 @@ function shuffle<T>(items: T[]): T[] {
   return arr
 }
 
+/** Server actions must return JSON-serializable data (no Prisma Decimal/Date). */
+function serializeQuizAttemptStart(attempt: { id: number; startedAt: Date }) {
+  return {
+    id: attempt.id,
+    startedAt: attempt.startedAt.toISOString(),
+  }
+}
+
 async function recalculateQuizTotalMarks(quizId: number) {
   const questions = await prisma.quizQuestion.findMany({ where: { quizId } })
   const total = questions.reduce((sum, q) => sum + Number(q.marks), 0)
@@ -629,7 +637,7 @@ export async function startQuizAttempt(quizId: number, userId: number) {
 
   const existing = await prisma.quizAttempt.findUnique({
     where: { quizId_studentId: { quizId, studentId: student.id } },
-    include: { answers: true },
+    select: { id: true, startedAt: true, isCompleted: true },
   })
 
   if (existing?.isCompleted) {
@@ -653,20 +661,23 @@ export async function startQuizAttempt(quizId: number, userId: number) {
         gradedById: null,
         gradedAt: null,
       },
+      select: { id: true, startedAt: true },
     })
-    return reset
+    return serializeQuizAttemptStart(reset)
   }
 
-  if (existing) return existing
+  if (existing) return serializeQuizAttemptStart(existing)
 
-  return prisma.quizAttempt.create({
+  const created = await prisma.quizAttempt.create({
     data: {
       quizId,
       studentId: student.id,
       totalMarks: quiz.totalMarks,
       startedAt: now,
     },
+    select: { id: true, startedAt: true },
   })
+  return serializeQuizAttemptStart(created)
 }
 
 export async function saveAnswer(
@@ -693,7 +704,7 @@ export async function saveAnswer(
     throw new Error('Time has expired')
   }
 
-  return prisma.quizAnswer.upsert({
+  await prisma.quizAnswer.upsert({
     where: {
       attemptId_questionId: {
         attemptId: data.attemptId,
@@ -711,6 +722,8 @@ export async function saveAnswer(
       textAnswer: data.textAnswer ?? null,
     },
   })
+
+  return { ok: true as const }
 }
 
 async function gradeAndCompleteAttempt(attemptId: number, timedOut: boolean) {
