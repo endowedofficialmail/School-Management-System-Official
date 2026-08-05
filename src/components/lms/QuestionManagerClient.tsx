@@ -15,14 +15,35 @@ import {
 } from '@/lib/actions/quizzes'
 import type { QuestionType } from '@prisma/client'
 
-type Quiz = Awaited<ReturnType<typeof import('@/lib/actions/quizzes').getQuizById>>
+type QuizQuestion = {
+  id: number
+  questionText: string
+  questionType: QuestionType
+  marks: number
+  order: number
+  explanation: string | null
+  options: Array<{
+    id: number
+    optionText: string
+    isCorrect: boolean
+    order: number
+  }>
+}
+
+type QuizDetail = {
+  id: number
+  title: string
+  isPublished: boolean
+  courseId: number
+  questions: QuizQuestion[]
+}
 
 export default function QuestionManagerClient({
   quiz: initial,
   userId,
   role,
 }: {
-  quiz: Quiz
+  quiz: QuizDetail
   userId: number
   role: 'ADMIN' | 'TEACHER'
 }) {
@@ -42,15 +63,17 @@ export default function QuestionManagerClient({
   const [saving, setSaving] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
 
+  const questions = quiz.questions ?? []
+
   const totalMarks = useMemo(
-    () => quiz.questions.reduce((s, q) => s + Number(q.marks), 0),
-    [quiz.questions]
+    () => questions.reduce((s, q) => s + Number(q.marks), 0),
+    [questions]
   )
 
   async function refresh() {
     const { getQuizById } = await import('@/lib/actions/quizzes')
     const updated = await getQuizById(quiz.id, userId, role)
-    setQuiz(updated)
+    setQuiz(updated as QuizDetail)
     router.refresh()
   }
 
@@ -112,7 +135,7 @@ export default function QuestionManagerClient({
     }
   }
 
-  function startEdit(q: Quiz['questions'][number]) {
+  function startEdit(q: QuizQuestion) {
     setEditingId(q.id)
     setType(q.questionType)
     setQuestionText(q.questionText)
@@ -137,7 +160,7 @@ export default function QuestionManagerClient({
         <div>
           <h1 className="text-2xl font-bold">Manage Questions — {quiz.title}</h1>
           <div className="flex gap-2 mt-1 text-sm text-muted-foreground">
-            <span>Total questions: {quiz.questions.length}</span>
+            <span>Total questions: {questions.length}</span>
             <span>·</span>
             <span>Total marks: {totalMarks}</span>
             <Badge variant={quiz.isPublished ? 'default' : 'secondary'}>
@@ -253,7 +276,7 @@ export default function QuestionManagerClient({
       </Card>
 
       <div className="space-y-3">
-        {quiz.questions.map((q, idx) => (
+        {questions.map((q, idx) => (
           <Card key={q.id}>
             <CardContent className="p-4 space-y-2">
               <div className="flex justify-between gap-2">
@@ -306,11 +329,11 @@ export default function QuestionManagerClient({
       </div>
 
       <div className="flex items-center justify-between border-t pt-4">
-        <p className="text-sm font-medium">Total: {quiz.questions.length} questions | {totalMarks} marks</p>
+        <p className="text-sm font-medium">Total: {questions.length} questions | {totalMarks} marks</p>
         {!quiz.isPublished && (
           <Button
             className="bg-emerald-600 hover:bg-emerald-700"
-            disabled={quiz.questions.length === 0}
+            disabled={questions.length === 0}
             onClick={async () => {
               try {
                 const updated = await publishQuiz(quiz.id, userId, role)

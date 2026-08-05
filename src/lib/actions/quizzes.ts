@@ -65,15 +65,32 @@ function serializeQuizAttemptStart(attempt: { id: number; startedAt: Date }) {
   }
 }
 
-function serializeQuizRecord<
-  T extends {
-    totalMarks: unknown
-    passingMarks: unknown
-    startTime?: Date | null
-    endTime?: Date | null
-    questions?: Array<{ marks: unknown; [key: string]: unknown }>
-  },
->(quiz: T) {
+type SerializeQuizInput = {
+  totalMarks: unknown
+  passingMarks: unknown
+  startTime?: Date | null
+  endTime?: Date | null
+  questions?: Array<{ marks: unknown }>
+}
+
+type SerializedQuiz<T extends SerializeQuizInput> = Omit<
+  T,
+  'totalMarks' | 'passingMarks' | 'startTime' | 'endTime' | 'questions'
+> & {
+  totalMarks: number
+  passingMarks: number
+  startTime: string | null
+  endTime: string | null
+  questions: Array<
+    (T['questions'] extends Array<infer Q> ? Q : never) extends infer Q
+      ? Q extends { marks: unknown }
+        ? Omit<Q, 'marks'> & { marks: number }
+        : never
+      : never
+  >
+}
+
+function serializeQuizRecord<T extends SerializeQuizInput>(quiz: T): SerializedQuiz<T> {
   const { questions, ...rest } = quiz
   return {
     ...rest,
@@ -85,7 +102,7 @@ function serializeQuizRecord<
       ...q,
       marks: Number(q.marks),
     })),
-  }
+  } as SerializedQuiz<T>
 }
 
 async function recalculateQuizTotalMarks(quizId: number) {
