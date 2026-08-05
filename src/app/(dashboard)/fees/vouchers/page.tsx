@@ -109,10 +109,15 @@ export default function FeeVouchersPage() {
   const [lastGeneratedClass, setLastGeneratedClass] = useState<{ classId: number; month: number; year: number } | null>(null)
 
   const [classForm, setClassForm] = useState({
-    classId: '', month: String(CURRENT_MONTH), year: String(CURRENT_YEAR),
+    classId: '',
+    selectedMonths: [CURRENT_MONTH] as number[],
+    year: String(CURRENT_YEAR),
     dueDate: format(new Date(CURRENT_YEAR, CURRENT_MONTH - 1, 10), 'yyyy-MM-dd'),
     feeStructureIds: [] as number[],
   })
+  const [classStudents, setClassStudents] = useState<StudentItem[]>([])
+  const [studentFeeMap, setStudentFeeMap] = useState<Record<number, { customAmount: number; applyTo: 'month' | 'year' }>>({})
+  const [applyAllAmount, setApplyAllAmount] = useState('')
   const [generatingClass, setGeneratingClass] = useState(false)
 
   const [studentForm, setStudentForm] = useState({
@@ -254,20 +259,91 @@ export default function FeeVouchersPage() {
     }))
   }
 
+  useEffect(() => {
+    if (!classForm.classId) { setClassStudents([]); return }
+    getStudents({ classId: Number(classForm.classId), status: 'ACTIVE', fetchAll: true }).then((students) => {
+      setClassStudents(students)
+      const base = feeStructures
+        .filter((f) => classForm.feeStructureIds.includes(f.id))
+        .reduce((s, f) => s + Number(f.amount), 0)
+      const map: Record<number, { customAmount: number; applyTo: 'month' | 'year' }> = {}
+      for (const s of students) {
+        map[s.id] = { customAmount: base, applyTo: 'month' }
+      }
+      setStudentFeeMap(map)
+    })
+  }, [classForm.classId, classForm.feeStructureIds, feeStructures])
+
+  const allMonthsSelected = classForm.selectedMonths.length === 12
+
+  function toggleMonth(month: number) {
+    setClassForm((f) => ({
+      ...f,
+      selectedMonths: f.selectedMonths.includes(month)
+        ? f.selectedMonths.filter((m) => m !== month)
+        : [...f.selectedMonths, month].sort((a, b) => a - b),
+    }))
+  }
+
+  function toggleAllMonths(checked: boolean) {
+    setClassForm((f) => ({
+      ...f,
+      selectedMonths: checked ? MONTHS.map((m) => m.value) : [],
+    }))
+  }
+
+  function resetAllFeesToBase() {
+    const base = classPreviewTotal
+    setStudentFeeMap((prev) => {
+      const next = { ...prev }
+      for (const id of Object.keys(next)) {
+        next[Number(id)] = { ...next[Number(id)], customAmount: base }
+      }
+      return next
+    })
+  }
+
+  function applySameAmountToAll() {
+    const amt = parseFloat(applyAllAmount)
+    if (isNaN(amt)) return
+    setStudentFeeMap((prev) => {
+      const next = { ...prev }
+      for (const id of Object.keys(next)) {
+        next[Number(id)] = { ...next[Number(id)], customAmount: amt }
+      }
+      return next
+    })
+  }
+
   async function handleGenerateClass() {
     if (!classForm.classId) { toast.error('Select a class'); return }
     if (classForm.feeStructureIds.length === 0) { toast.error('Select at least one fee structure'); return }
+    if (classForm.selectedMonths.length === 0) { toast.error('Select at least one month'); return }
     setGeneratingClass(true)
     try {
+      const months = classForm.selectedMonths.map((m) => ({
+        month: m,
+        year: Number(classForm.year),
+      }))
+      const studentFees = classStudents.map((s) => ({
+        studentId: s.id,
+        customAmount: studentFeeMap[s.id]?.customAmount ?? classPreviewTotal,
+        baseAmount: classPreviewTotal,
+        applyTo: studentFeeMap[s.id]?.applyTo ?? 'month' as const,
+      }))
       const result = await generateVouchersForClass({
         classId: Number(classForm.classId),
-        month: Number(classForm.month),
-        year: Number(classForm.year),
+        months,
         dueDate: new Date(classForm.dueDate),
         feeStructureIds: classForm.feeStructureIds,
+        studentFees,
       })
       toast.success(`${result.created} vouchers created, ${result.skipped} already existed`)
-      setLastGeneratedClass({ classId: Number(classForm.classId), month: Number(classForm.month), year: Number(classForm.year) })
+      setLastGeneratedClass({
+        classId: Number(classForm.classId),
+        month: classForm.selectedMonths[0],
+        year: Number(classForm.year),
+      })
       setClassDialogOpen(false)
       loadData()
     } catch { toast.error('Failed to generate vouchers') }
@@ -621,7 +697,7 @@ export default function FeeVouchersPage() {
 
       {/* Generate Class Dialog */}
       <Dialog open={classDialogOpen} onOpenChange={setClassDialogOpen}>
-        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Generate Vouchers for Class</DialogTitle>
             <DialogDescription>Create fee vouchers for all active students in a class.</DialogDescription>
@@ -636,20 +712,31 @@ export default function FeeVouchersPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Month *</Label>
-                <Select value={classForm.month} onValueChange={(v) => setClassForm((f) => ({ ...f, month: v ?? '' }))}>
-                  <SelectTrigger className="h-9 w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {MONTHS.map((m) => <SelectItem key={m.value} value={String(m.value)}>{m.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Months *</Label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" checked={allMonthsSelected} onChange={(e) => toggleAllMonths(e.target.checked)} className="rounded" />
+                  Select All Months
+                </label>
               </div>
-              <div className="space-y-1.5">
-                <Label>Year *</Label>
-                <Input type="number" value={classForm.year} onChange={(e) => setClassForm((f) => ({ ...f, year: e.target.value }))} className="h-9" />
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 rounded-lg border p-3">
+                {MONTHS.map((m) => (
+                  <label key={m.value} className="flex items-center gap-2 text-sm cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={classForm.selectedMonths.includes(m.value)}
+                      onChange={() => toggleMonth(m.value)}
+                      className="rounded"
+                    />
+                    {m.label.slice(0, 3)}
+                  </label>
+                ))}
               </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Year *</Label>
+              <Input type="number" value={classForm.year} onChange={(e) => setClassForm((f) => ({ ...f, year: e.target.value }))} className="h-9 w-32" />
             </div>
             <div className="space-y-1.5">
               <Label>Due Date *</Label>
@@ -675,10 +762,98 @@ export default function FeeVouchersPage() {
               </div>
               {classForm.feeStructureIds.length > 0 && (
                 <p className="text-sm font-medium text-primary">
-                  Total per student: {formatRs(classPreviewTotal)}
+                  {classForm.selectedMonths.length > 1
+                    ? `Fee will be generated for ${classForm.selectedMonths.length} months — Total per student: ${formatRs(classPreviewTotal)} × ${classForm.selectedMonths.length} = ${formatRs(classPreviewTotal * classForm.selectedMonths.length)}`
+                    : `Total per student: ${formatRs(classPreviewTotal)}`}
                 </p>
               )}
             </div>
+
+            {classForm.classId && classForm.feeStructureIds.length > 0 && classStudents.length > 0 && (
+              <div className="space-y-3 border-t pt-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label className="text-base">Student Fee Details</Label>
+                  <Button type="button" variant="outline" size="sm" onClick={resetAllFeesToBase}>
+                    Reset All to Base Fee
+                  </Button>
+                </div>
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1">
+                    <Label className="text-xs">Apply Same Amount to All</Label>
+                    <Input
+                      type="number"
+                      placeholder="Amount"
+                      value={applyAllAmount}
+                      onChange={(e) => setApplyAllAmount(e.target.value)}
+                      className="h-8"
+                    />
+                  </div>
+                  <Button type="button" variant="secondary" size="sm" onClick={applySameAmountToAll}>Apply</Button>
+                </div>
+                <div className="rounded-lg border overflow-x-auto max-h-64 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50 sticky top-0">
+                      <tr>
+                        <th className="text-left p-2 font-medium">Student</th>
+                        <th className="text-left p-2 font-medium">Reg#</th>
+                        <th className="text-right p-2 font-medium">Base Fee</th>
+                        <th className="text-right p-2 font-medium">Custom Amount</th>
+                        <th className="text-left p-2 font-medium">Apply To</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {classStudents.map((s) => {
+                        const fee = studentFeeMap[s.id] ?? { customAmount: classPreviewTotal, applyTo: 'month' as const }
+                        const differs = fee.customAmount !== classPreviewTotal
+                        return (
+                          <tr key={s.id} className="border-t">
+                            <td className="p-2">{s.firstName} {s.lastName}</td>
+                            <td className="p-2 font-mono text-xs">{s.registrationNumber}</td>
+                            <td className="p-2 text-right text-muted-foreground">{formatRs(classPreviewTotal)}</td>
+                            <td className="p-2">
+                              <Input
+                                type="number"
+                                className="h-8 w-24 ml-auto text-right"
+                                value={fee.customAmount}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value) || 0
+                                  setStudentFeeMap((prev) => ({
+                                    ...prev,
+                                    [s.id]: { ...fee, customAmount: val },
+                                  }))
+                                }}
+                              />
+                            </td>
+                            <td className="p-2">
+                              {differs ? (
+                                <select
+                                  className={cn(
+                                    'h-8 rounded border px-2 text-xs',
+                                    fee.applyTo === 'month' ? 'text-orange-700 border-orange-300 bg-orange-50' : 'text-blue-700 border-blue-300 bg-blue-50'
+                                  )}
+                                  value={fee.applyTo}
+                                  onChange={(e) => {
+                                    setStudentFeeMap((prev) => ({
+                                      ...prev,
+                                      [s.id]: { ...fee, applyTo: e.target.value as 'month' | 'year' },
+                                    }))
+                                  }}
+                                >
+                                  <option value="month">This Month Only</option>
+                                  <option value="year">Entire Year</option>
+                                </select>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setClassDialogOpen(false)}>Cancel</Button>

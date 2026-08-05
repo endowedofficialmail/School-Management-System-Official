@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { format } from 'date-fns'
-import { ArrowLeft, Pencil, Award, IdCard } from 'lucide-react'
+import { ArrowLeft, Pencil, Award, IdCard, Users, Printer } from 'lucide-react'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { UserRole } from '@/types'
@@ -18,6 +18,7 @@ import AttendanceCalendar from '@/components/portal/AttendanceCalendar'
 import Breadcrumb from '@/components/shared/Breadcrumb'
 import StudentCertificatesTab from '@/components/certificates/StudentCertificatesTab'
 import StudentRollSlipsTab from '@/components/rollslips/StudentRollSlipsTab'
+import StudentFamilyTab from '@/components/family/StudentFamilyTab'
 import { getStudentPromotionHistory } from '@/lib/actions/promotions'
 
 const statusConfig = {
@@ -73,10 +74,20 @@ export default async function StudentDetailPage({
           </Link>
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">{fullName}</h1>
         </div>
-        <Link href={`/students/${id}/edit`} className={buttonVariants()}>
-          <Pencil className="h-4 w-4 mr-2" />
-          Edit Student
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/print/idcard/${id}`}
+            target="_blank"
+            className={buttonVariants({ variant: 'outline' })}
+          >
+            <Printer className="h-4 w-4 mr-2" />
+            Print ID Card
+          </Link>
+          <Link href={`/students/${id}/edit`} className={buttonVariants()}>
+            <Pencil className="h-4 w-4 mr-2" />
+            Edit Student
+          </Link>
+        </div>
       </div>
 
       {/* Profile header card */}
@@ -84,9 +95,18 @@ export default async function StudentDetailPage({
         <CardContent className="p-6">
           <div className="flex items-center gap-5">
             <Avatar className="h-16 w-16 text-lg">
-              <AvatarFallback className="bg-primary text-primary-foreground font-semibold text-lg">
-                {initials}
-              </AvatarFallback>
+              {student.photoBase64 ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={student.photoBase64}
+                  alt={fullName}
+                  className="h-16 w-16 rounded-full object-cover"
+                />
+              ) : (
+                <AvatarFallback className="bg-primary text-primary-foreground font-semibold text-lg">
+                  {initials}
+                </AvatarFallback>
+              )}
             </Avatar>
             <div className="flex flex-col gap-1">
               <h2 className="text-lg font-bold text-slate-900">{fullName}</h2>
@@ -124,6 +144,10 @@ export default async function StudentDetailPage({
           <TabsTrigger value="rollslips">
             <IdCard className="h-3.5 w-3.5 mr-1" />
             Roll Slips
+          </TabsTrigger>
+          <TabsTrigger value="family">
+            <Users className="h-3.5 w-3.5 mr-1" />
+            Family
           </TabsTrigger>
         </TabsList>
 
@@ -171,6 +195,10 @@ export default async function StudentDetailPage({
                 <InfoRow label="Guardian Name" value={student.guardianName} />
                 <InfoRow label="Guardian Phone" value={student.guardianPhone} />
                 <InfoRow label="Guardian CNIC" value={student.guardianCNIC} />
+                <InfoRow label="Student CNIC" value={student.studentCNIC} />
+                {student.family && (
+                  <InfoRow label="Family ID" value={student.family.fid} />
+                )}
               </CardContent>
             </Card>
           </div>
@@ -248,6 +276,10 @@ export default async function StudentDetailPage({
 
         <TabsContent value="rollslips" className="pt-4">
           <StudentRollSlipsTab studentId={id} />
+        </TabsContent>
+
+        <TabsContent value="family" className="pt-4">
+          <StudentFamilyTab studentId={id} guardianCNIC={student.guardianCNIC} />
         </TabsContent>
       </Tabs>
     </div>

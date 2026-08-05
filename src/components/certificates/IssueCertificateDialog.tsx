@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { format } from 'date-fns'
-import { Baby, FileBadge, Shield, CheckCircle2 } from 'lucide-react'
+import { Baby, FileBadge, Shield, CheckCircle2, BadgeCheck } from 'lucide-react'
 import { CertificateType } from '@prisma/client'
 import { toast } from 'sonner'
 
@@ -168,6 +168,12 @@ export default function IssueCertificateDialog({
         return false
       }
     }
+    if (form.type === 'BONAFIDE') {
+      if (!form.purpose.trim()) {
+        toast.error('Purpose is required for bonafide certificate')
+        return false
+      }
+    }
     return true
   }
 
@@ -225,6 +231,12 @@ export default function IssueCertificateDialog({
       title: 'Character Certificate',
       desc: "Certifies student's moral character",
       icon: Shield,
+    },
+    {
+      type: 'BONAFIDE' as CertificateType,
+      title: 'Bonafide Certificate',
+      desc: 'Confirms current enrollment status',
+      icon: BadgeCheck,
     },
   ]
 
@@ -374,15 +386,15 @@ export default function IssueCertificateDialog({
           </div>
         )}
 
-        {step === 2 && form.type === 'CHARACTER' && (
+        {step === 2 && (form.type === 'CHARACTER' || form.type === 'BONAFIDE') && (
           <div className="space-y-3">
             <div className="space-y-2">
-              <Label>Character Remarks</Label>
+              <Label>{form.type === 'BONAFIDE' ? 'Conduct Remarks (optional)' : 'Character Remarks'}</Label>
               <TextareaField value={form.characterRemarks} onChange={(e) => setForm((f) => ({ ...f, characterRemarks: e.target.value }))} />
             </div>
             <div className="space-y-2">
               <Label>Purpose *</Label>
-              <Input value={form.purpose} onChange={(e) => setForm((f) => ({ ...f, purpose: e.target.value }))} />
+              <Input value={form.purpose} onChange={(e) => setForm((f) => ({ ...f, purpose: e.target.value }))} placeholder="e.g. For bank account opening" />
             </div>
             <div className="space-y-2">
               <Label>Notes</Label>

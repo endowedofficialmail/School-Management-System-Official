@@ -20,13 +20,16 @@ import {
 import RecordPaymentDialog from '@/components/shared/RecordPaymentDialog'
 import { formatRs } from '@/components/vouchers/VoucherDocument'
 import {
-  getVouchers, manuallyAdjustAdvanceBalance, type VoucherWithDetails,
+  getVouchers, manuallyAdjustAdvanceBalance, getStudentFeeOverrides, deleteStudentFeeOverride,
+  type VoucherWithDetails,
 } from '@/lib/actions/vouchers'
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ]
+
+type FeeOverride = Awaited<ReturnType<typeof getStudentFeeOverrides>>[number]
 
 const STATUS_BADGE: Record<VoucherStatus, string> = {
   UNPAID: 'bg-red-100 text-red-700 hover:bg-red-100',
@@ -66,10 +69,14 @@ export default function StudentFeeHistoryTab({
   const [adjustAmount, setAdjustAmount] = useState('')
   const [adjustReason, setAdjustReason] = useState('')
   const [adjusting, setAdjusting] = useState(false)
+  const [feeOverrides, setFeeOverrides] = useState<FeeOverride[]>([])
 
   const load = useCallback(() => {
     getVouchers({ studentId }).then((data) => { setVouchers(data); setLoading(false) })
-  }, [studentId])
+    if (isAdmin) {
+      getStudentFeeOverrides(studentId).then(setFeeOverrides)
+    }
+  }, [studentId, isAdmin])
 
   useEffect(() => { load() }, [load])
   useEffect(() => { setAdvanceBalance(initialAdvance) }, [initialAdvance])
@@ -127,6 +134,17 @@ export default function StudentFeeHistoryTab({
     }
   }
 
+  async function handleRemoveOverride(id: number) {
+    if (!confirm('Remove this custom fee setting? Future vouchers will use standard fees.')) return
+    try {
+      await deleteStudentFeeOverride(id)
+      toast.success('Custom fee setting removed')
+      load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to remove')
+    }
+  }
+
   if (loading) {
     return <div className="space-y-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-16 rounded-xl" />)}</div>
   }
@@ -172,6 +190,48 @@ export default function StudentFeeHistoryTab({
             Adjust Advance Balance
           </Button>
         </div>
+      )}
+
+      {isAdmin && feeOverrides.length > 0 && (
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <p className="font-semibold text-sm">Custom Fee Settings</p>
+            <div className="rounded-lg border overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="text-left p-2">Description</th>
+                    <th className="text-right p-2">Amount</th>
+                    <th className="text-left p-2">Type</th>
+                    <th className="text-left p-2">Period</th>
+                    <th className="text-right p-2">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {feeOverrides.map((o) => (
+                    <tr key={o.id} className="border-t">
+                      <td className="p-2">{o.description}</td>
+                      <td className="p-2 text-right">{formatRs(Number(o.amount))}</td>
+                      <td className="p-2">{o.isYearLong ? 'Year' : 'Month'}</td>
+                      <td className="p-2 text-muted-foreground">
+                        {o.isYearLong
+                          ? (o.academicYear?.name ?? 'Active Year')
+                          : o.month && o.year
+                            ? `${MONTHS[o.month - 1]} ${o.year}`
+                            : '—'}
+                      </td>
+                      <td className="p-2 text-right">
+                        <Button variant="ghost" size="sm" className="text-red-600 h-7" onClick={() => handleRemoveOverride(o.id)}>
+                          Remove
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <div className={cn('grid gap-3', (advanceCredit > 0 || advanceBalance > 0) ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-3')}>

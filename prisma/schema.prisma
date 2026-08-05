@@ -52,6 +52,10 @@ enum CertificateType {
   BIRTH
   SCHOOL_LEAVING
   CHARACTER
+  BONAFIDE
+  OFFER_LETTER
+  EXPERIENCE_LETTER
+  RESIGNATION_LETTER
 }
 
 enum CertificateStatus {
@@ -77,6 +81,7 @@ model User {
   studentProfile    StudentPortalProfile?
   parentProfile     Parent?
   issuedCertificates Certificate[] @relation("issuedCertificates")
+  teacherCertificates Certificate[] @relation("TeacherCertificates")
   promotionRecords  PromotionRecord[]
   issuedRollSlips   RollNumberSlip[]
   taughtCourses     Course[] @relation("CourseTeacher")
@@ -115,6 +120,7 @@ model AcademicYear {
   exams        Exam[]
   promotionsFrom PromotionRecord[] @relation("PromotionFromYear")
   promotionsTo   PromotionRecord[] @relation("PromotionToYear")
+  studentFeeOverrides StudentFeeOverride[]
 }
 
 model Class {
@@ -142,6 +148,15 @@ model Class {
   @@unique([name, section, academicYearId])
 }
 
+model Family {
+  id           Int       @id @default(autoincrement())
+  fid          String    @unique
+  guardianCNIC String    @unique
+  createdAt    DateTime  @default(now())
+
+  students Student[]
+}
+
 model Student {
   id                 Int           @id @default(autoincrement())
   registrationNumber String        @unique
@@ -153,7 +168,11 @@ model Student {
   guardianName       String
   guardianPhone      String
   guardianCNIC       String?
+  studentCNIC        String?
   photo              String?
+  photoBase64        String?       @db.Text
+  family             Family?       @relation(fields: [familyId], references: [id])
+  familyId           Int?
   class              Class         @relation(fields: [classId], references: [id])
   classId            Int
   status             StudentStatus @default(ACTIVE)
@@ -177,9 +196,29 @@ model Student {
   homeworkCompletions HomeworkCompletion[]
   assignmentSubmissions AssignmentSubmission[]
   quizAttempts       QuizAttempt[]
+  feeOverrides       StudentFeeOverride[]
 
   @@index([classId])
   @@index([status])
+  @@index([familyId])
+}
+
+model StudentFeeOverride {
+  id             Int           @id @default(autoincrement())
+  student        Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId      Int
+  description    String
+  amount         Decimal       @db.Decimal(10, 2)
+  isYearLong     Boolean       @default(false)
+  month          Int?
+  year           Int?
+  academicYear   AcademicYear? @relation(fields: [academicYearId], references: [id])
+  academicYearId Int?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([studentId])
+  @@index([studentId, description, month, year])
 }
 
 model PromotionRecord {
@@ -534,8 +573,10 @@ model Certificate {
   certificateNumber String            @unique
   type              CertificateType
   status            CertificateStatus @default(ISSUED)
-  student           Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  studentId         Int
+  student           Student?          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId         Int?
+  teacher           User?             @relation("TeacherCertificates", fields: [teacherId], references: [id])
+  teacherId         Int?
   issuedBy          User              @relation("issuedCertificates", fields: [issuedById], references: [id])
   issuedById        Int
   issueDate         DateTime          @default(now())
@@ -549,19 +590,34 @@ model Certificate {
   motherCNIC        String?
   fatherOccupation  String?
 
-  // School Leaving Certificate specific fields
+  // School Leaving / Experience letter fields
   dateOfLeaving     DateTime?
   lastClass         String?
   reasonForLeaving  String?
   conductDuringStay String?
 
-  // Character Certificate specific fields
+  // Character / Bonafide fields
   characterRemarks  String?
   purpose           String?
+
+  // Teacher letter fields
+  designation       String?
+  joiningDate       DateTime?
+  leavingDate       DateTime?
+  salary            String?
+  workingHours      String?
+  terms             String?           @db.Text
+  noticePeriod      String?
+  resignationDate   DateTime?
+  lastWorkingDate   DateTime?
 
   notes             String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+
+  @@index([studentId])
+  @@index([teacherId])
+  @@index([type])
 }
 
 // ─── LMS Phase 1 ─────────────────────────────────────────────────────────────

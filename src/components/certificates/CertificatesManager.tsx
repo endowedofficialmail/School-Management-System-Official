@@ -45,7 +45,8 @@ function typeBadge(type: CertificateType) {
   const base = 'px-2 py-0.5 text-xs font-medium rounded-full'
   if (type === 'BIRTH') return <span className={cn(base, 'bg-blue-100 text-blue-700')}>Birth Certificate</span>
   if (type === 'SCHOOL_LEAVING') return <span className={cn(base, 'bg-orange-100 text-orange-800')}>School Leaving</span>
-  return <span className={cn(base, 'bg-purple-100 text-purple-700')}>Character</span>
+  if (type === 'CHARACTER') return <span className={cn(base, 'bg-purple-100 text-purple-700')}>Character</span>
+  return <span className={cn(base, 'bg-teal-100 text-teal-700')}>Bonafide</span>
 }
 
 function statusBadge(status: CertificateStatus) {
@@ -93,12 +94,17 @@ export default function CertificatesManager({ role, userId }: Props) {
   }, [type, status])
 
   const filtered = useMemo(() => {
+    const studentTypes = new Set(['BIRTH', 'SCHOOL_LEAVING', 'CHARACTER', 'BONAFIDE'])
     const q = search.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter((r) =>
-      r.certificateNumber.toLowerCase().includes(q) ||
-      `${r.student.firstName} ${r.student.lastName}`.toLowerCase().includes(q)
-    )
+    return rows.filter((r) => {
+      if (!studentTypes.has(r.type)) return false
+      if (!q) return true
+      if (!r.student) return r.certificateNumber.toLowerCase().includes(q)
+      return (
+        r.certificateNumber.toLowerCase().includes(q) ||
+        `${r.student.firstName} ${r.student.lastName}`.toLowerCase().includes(q)
+      )
+    })
   }, [rows, search])
 
   async function onRevoke(id: number) {
@@ -142,6 +148,7 @@ export default function CertificatesManager({ role, userId }: Props) {
               <SelectItem value="BIRTH">Birth Certificate</SelectItem>
               <SelectItem value="SCHOOL_LEAVING">School Leaving</SelectItem>
               <SelectItem value="CHARACTER">Character Certificate</SelectItem>
+              <SelectItem value="BONAFIDE">Bonafide Certificate</SelectItem>
             </SelectContent>
           </Select>
           <Select value={status} onValueChange={(v) => setStatus((v as CertificateStatus) || 'ALL')}>
@@ -186,8 +193,10 @@ export default function CertificatesManager({ role, userId }: Props) {
                 <TableRow key={r.id} className={r.status === 'REVOKED' ? 'opacity-80' : ''}>
                   <TableCell className="font-mono font-semibold">{r.certificateNumber}</TableCell>
                   <TableCell>{typeBadge(r.type)}</TableCell>
-                  <TableCell className={r.status === 'REVOKED' ? 'line-through' : ''}>{r.student.firstName} {r.student.lastName}</TableCell>
-                  <TableCell>{r.student.class.name} - {r.student.class.section}</TableCell>
+                  <TableCell className={r.status === 'REVOKED' ? 'line-through' : ''}>
+                    {r.student ? `${r.student.firstName} ${r.student.lastName}` : '—'}
+                  </TableCell>
+                  <TableCell>{r.student ? `${r.student.class.name} - ${r.student.class.section}` : '—'}</TableCell>
                   <TableCell>{formatDate(r.issueDate)}</TableCell>
                   <TableCell>{r.issuedBy.name}</TableCell>
                   <TableCell>{statusBadge(r.status)}</TableCell>

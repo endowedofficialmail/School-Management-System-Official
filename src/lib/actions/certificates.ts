@@ -14,6 +14,14 @@ function prefixForType(type: CertificateType): string {
       return 'SLC'
     case 'CHARACTER':
       return 'CC'
+    case 'BONAFIDE':
+      return 'BNC'
+    case 'OFFER_LETTER':
+      return 'OL'
+    case 'EXPERIENCE_LETTER':
+      return 'EL'
+    case 'RESIGNATION_LETTER':
+      return 'RL'
     default:
       return 'CERT'
   }
@@ -93,6 +101,54 @@ export async function issueCertificate(data: {
   return created
 }
 
+export async function issueTeacherLetter(data: {
+  type: 'OFFER_LETTER' | 'EXPERIENCE_LETTER' | 'RESIGNATION_LETTER'
+  teacherId: number
+  issuedById: number
+  issueDate: Date
+  designation: string
+  joiningDate?: Date
+  leavingDate?: Date
+  workingHours?: string
+  terms?: string
+  salary?: string
+  noticePeriod?: string
+  resignationDate?: Date
+  lastWorkingDate?: Date
+  reasonForLeaving?: string
+  notes?: string
+}) {
+  const certificateNumber = await generateCertificateNumber(data.type)
+
+  const created = await prisma.certificate.create({
+    data: {
+      certificateNumber,
+      type: data.type,
+      teacherId: data.teacherId,
+      issuedById: data.issuedById,
+      issueDate: data.issueDate,
+      designation: data.designation,
+      joiningDate: data.joiningDate ?? null,
+      leavingDate: data.leavingDate ?? null,
+      workingHours: data.workingHours ?? null,
+      terms: data.terms ?? null,
+      salary: data.salary ?? null,
+      noticePeriod: data.noticePeriod ?? null,
+      resignationDate: data.resignationDate ?? null,
+      lastWorkingDate: data.lastWorkingDate ?? null,
+      reasonForLeaving: data.reasonForLeaving ?? null,
+      notes: data.notes ?? null,
+    },
+    include: {
+      teacher: { select: { id: true, name: true, email: true } },
+      issuedBy: { select: { id: true, name: true } },
+    },
+  })
+
+  revalidatePath('/certificates')
+  return created
+}
+
 export async function getCertificates(filters?: {
   type?: CertificateType
   studentId?: number
@@ -138,6 +194,34 @@ export async function getCertificates(filters?: {
     where,
     include: {
       student: { include: { class: true } },
+      teacher: { select: { id: true, name: true, email: true } },
+      issuedBy: { select: { id: true, name: true } },
+    },
+    orderBy: { issueDate: 'desc' },
+  })
+}
+
+export async function getTeacherLetters(filters?: {
+  type?: CertificateType
+  status?: CertificateStatus
+  search?: string
+}) {
+  const teacherTypes: CertificateType[] = ['OFFER_LETTER', 'EXPERIENCE_LETTER', 'RESIGNATION_LETTER']
+  const where: Parameters<typeof prisma.certificate.findMany>[0]['where'] = {
+    type: filters?.type ?? { in: teacherTypes },
+  }
+  if (filters?.status) where.status = filters.status
+  if (filters?.search) {
+    where.OR = [
+      { certificateNumber: { contains: filters.search, mode: 'insensitive' } },
+      { teacher: { name: { contains: filters.search, mode: 'insensitive' } } },
+    ]
+  }
+
+  return prisma.certificate.findMany({
+    where,
+    include: {
+      teacher: { select: { id: true, name: true, email: true } },
       issuedBy: { select: { id: true, name: true } },
     },
     orderBy: { issueDate: 'desc' },
@@ -153,6 +237,7 @@ export async function getCertificateById(id: number) {
           class: { include: { academicYear: true } },
         },
       },
+      teacher: { select: { id: true, name: true, email: true } },
       issuedBy: { select: { id: true, name: true } },
     },
   })
@@ -187,11 +272,15 @@ export async function deleteCertificate(id: number) {
 }
 
 export async function getCertificateStats() {
-  const [totalIssued, birth, leaving, character, thisMonthIssued] = await Promise.all([
+  const [totalIssued, birth, leaving, character, bonafide, offer, experience, resignation, thisMonthIssued] = await Promise.all([
     prisma.certificate.count({ where: { status: 'ISSUED' } }),
     prisma.certificate.count({ where: { status: 'ISSUED', type: 'BIRTH' } }),
     prisma.certificate.count({ where: { status: 'ISSUED', type: 'SCHOOL_LEAVING' } }),
     prisma.certificate.count({ where: { status: 'ISSUED', type: 'CHARACTER' } }),
+    prisma.certificate.count({ where: { status: 'ISSUED', type: 'BONAFIDE' } }),
+    prisma.certificate.count({ where: { status: 'ISSUED', type: 'OFFER_LETTER' } }),
+    prisma.certificate.count({ where: { status: 'ISSUED', type: 'EXPERIENCE_LETTER' } }),
+    prisma.certificate.count({ where: { status: 'ISSUED', type: 'RESIGNATION_LETTER' } }),
     (async () => {
       const now = new Date()
       const start = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1))
@@ -210,6 +299,10 @@ export async function getCertificateStats() {
     birthCertificates: birth,
     schoolLeavingCertificates: leaving,
     characterCertificates: character,
+    bonafideCertificates: bonafide,
+    offerLetters: offer,
+    experienceLetters: experience,
+    resignationLetters: resignation,
     thisMonthIssued,
   }
 }

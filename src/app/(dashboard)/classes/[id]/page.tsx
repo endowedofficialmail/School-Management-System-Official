@@ -11,6 +11,7 @@ import {
   Settings,
   CalendarDays,
   ArrowUpCircle,
+  Printer,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -276,6 +277,14 @@ export default async function ClassDetailPage({ params }: Props) {
               >
                 <Plus className="h-3.5 w-3.5" />
                 Add Subject
+              </Link>
+              <Link
+                href={`/print/idcard/class/${id}`}
+                target="_blank"
+                className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'gap-2')}
+              >
+                <Printer className="h-3.5 w-3.5" />
+                Print All ID Cards
               </Link>
               <Link
                 href={`/students/new?classId=${id}`}

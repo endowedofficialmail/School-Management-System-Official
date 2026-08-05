@@ -6,6 +6,12 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+export function formatCNIC(cnic: string) {
+  const clean = cnic.replace(/[-\s]/g, '')
+  if (clean.length !== 13) return cnic
+  return `${clean.slice(0, 5)}-${clean.slice(5, 12)}-${clean.slice(12)}`
+}
+
 export function formatDate(date: Date | string | number): string {
   return format(new Date(date), 'dd MMM yyyy')
 }

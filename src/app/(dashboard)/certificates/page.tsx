@@ -7,7 +7,7 @@ import AccessDenied from '@/components/shared/AccessDenied'
 import Breadcrumb from '@/components/shared/Breadcrumb'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Award, Baby, LogOut, Shield } from 'lucide-react'
-import CertificatesManager from '@/components/certificates/CertificatesManager'
+import CertificatesTabs from '@/components/certificates/CertificatesTabs'
 
 export const dynamic = 'force-dynamic'
 
@@ -83,7 +83,15 @@ export default async function CertificatesPage() {
         </Card>
       </div>
 
-      <CertificatesManager role={role} userId={userId} />
+      <CertificatesTabs
+        role={role}
+        userId={userId}
+        stats={{
+          offerLetters: stats.offerLetters,
+          experienceLetters: stats.experienceLetters,
+          resignationLetters: stats.resignationLetters,
+        }}
+      />
     </div>
   )
 }

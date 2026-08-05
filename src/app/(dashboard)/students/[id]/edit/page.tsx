@@ -11,6 +11,7 @@ import { buttonVariants } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import StudentForm, { StudentFormValues } from '@/components/shared/StudentForm'
 import { getStudentById, updateStudent } from '@/lib/actions/students'
+import { getFamilyByStudentId } from '@/lib/actions/family'
 
 export default function EditStudentPage({ params }: { params: { id: string } }) {
   const router = useRouter()
@@ -19,9 +20,15 @@ export default function EditStudentPage({ params }: { params: { id: string } }) 
   const [defaultValues, setDefaultValues] = useState<Partial<StudentFormValues> | null>(null)
   const [studentMissing, setStudentMissing] = useState(false)
 
+  const [familyInfo, setFamilyInfo] = useState<{
+    fid: string
+    siblingCount: number
+    siblings: { id: number; firstName: string; lastName: string; registrationNumber: string; class: { name: string; section: string } }[]
+  } | null>(null)
+
   useEffect(() => {
     if (isNaN(id)) { setStudentMissing(true); return }
-    getStudentById(id).then((student) => {
+    getStudentById(id).then(async (student) => {
       if (!student) { setStudentMissing(true); return }
       setDefaultValues({
         firstName: student.firstName,
@@ -34,10 +41,28 @@ export default function EditStudentPage({ params }: { params: { id: string } }) 
           ? format(new Date(student.dateOfBirth), 'yyyy-MM-dd')
           : '',
         guardianCNIC: student.guardianCNIC ?? '',
+        studentCNIC: student.studentCNIC ?? '',
+        photoBase64: student.photoBase64 ?? '',
         address: student.address ?? '',
         admissionDate: format(new Date(student.admissionDate), 'yyyy-MM-dd'),
         status: student.status,
       })
+      if (student.family) {
+        const { siblings, family } = await getFamilyByStudentId(id)
+        if (family) {
+          setFamilyInfo({
+            fid: family.fid,
+            siblingCount: siblings.length,
+            siblings: siblings.map((s) => ({
+              id: s.id,
+              firstName: s.firstName,
+              lastName: s.lastName,
+              registrationNumber: s.registrationNumber,
+              class: s.class,
+            })),
+          })
+        }
+      }
     })
   }, [id])
 
@@ -53,6 +78,8 @@ export default function EditStudentPage({ params }: { params: { id: string } }) 
         guardianPhone: data.guardianPhone,
         dateOfBirth: data.dateOfBirth || undefined,
         guardianCNIC: data.guardianCNIC || undefined,
+        studentCNIC: data.studentCNIC || undefined,
+        photoBase64: data.photoBase64 || undefined,
         address: data.address || undefined,
         admissionDate: data.admissionDate || undefined,
         status: data.status,
@@ -102,6 +129,7 @@ export default function EditStudentPage({ params }: { params: { id: string } }) 
           onSubmit={handleSubmit}
           isLoading={isLoading}
           submitLabel="Update Student"
+          familyInfo={familyInfo ?? undefined}
         />
       )}
     </div>

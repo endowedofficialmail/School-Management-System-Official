@@ -18,7 +18,7 @@ import {
   BookOpen,
   Bell,
   ClipboardList,
-  BookMarked,
+  GitBranch,
 } from 'lucide-react'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
@@ -43,6 +43,12 @@ const navItems: NavItem[] = [
     href: '/students',
     icon: Users,
     roles: ['ADMIN', 'RECEPTIONIST', 'TEACHER'],
+  },
+  {
+    title: 'Family Tree',
+    href: '/students/family',
+    icon: GitBranch,
+    roles: ['ADMIN', 'RECEPTIONIST'],
   },
   {
     title: 'Classes',

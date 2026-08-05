@@ -468,6 +468,69 @@ function CharacterCertificate({ data }: { data: CertData }) {
   )
 }
 
+function BonafideCertificate({ data }: { data: CertData }) {
+  const certificate = data.certificate
+  const school = data.school
+  const student = certificate.student!
+  const fullName = `${student.firstName} ${student.lastName}`.toUpperCase()
+  const issueDate = new Date(certificate.issueDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+
+  return (
+    <div style={{ maxWidth: 780, margin: '0 auto', border: '2px solid #000', padding: 24, fontFamily: 'Times New Roman, Times, serif', background: '#fff' }}>
+      <div style={{ textAlign: 'center', marginBottom: 12 }}>
+        <div style={{ fontSize: 20, fontWeight: 900, textTransform: 'uppercase' }}>{school?.name}</div>
+        <div style={{ fontSize: 11 }}>{school?.address}{school?.phone ? ` | ${school.phone}` : ''}</div>
+        <div style={{ marginTop: 8, fontWeight: 800, letterSpacing: 2, borderTop: '2px solid #000', borderBottom: '2px solid #000', padding: '4px 0' }}>
+          BONAFIDE CERTIFICATE
+        </div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 12 }}>
+        <span>Certificate No: <b>{certificate.certificateNumber}</b></span>
+        <span>Date: {issueDate}</span>
+      </div>
+      <div style={{ fontSize: 13, lineHeight: 1.7 }}>
+        <p>To Whom It May Concern,</p>
+        <p style={{ marginTop: 10 }}>
+          This is to certify that <b>{fullName}</b>, son/daughter of {student.guardianName},
+          bearing Registration No. {student.registrationNumber}, is a bonafide student of this institution.
+        </p>
+        <p style={{ marginTop: 8 }}>
+          He/She is currently enrolled in Class {student.class.name} – {student.class.section} for the
+          Academic Year {student.class.academicYear.name}.
+        </p>
+        <p style={{ marginTop: 8 }}>
+          Date of Admission: {new Date(student.admissionDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
+          {student.dateOfBirth && (
+            <> &nbsp;|&nbsp; Date of Birth: {new Date(student.dateOfBirth).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</>
+          )}
+        </p>
+        {certificate.characterRemarks && (
+          <p style={{ marginTop: 8 }}>
+            His/Her conduct and character during the period of study has been {certificate.characterRemarks}.
+          </p>
+        )}
+        <p style={{ marginTop: 8 }}>
+          This certificate is issued on his/her request for {certificate.purpose}.
+        </p>
+      </div>
+      <div style={{ borderTop: '1px solid #000', marginTop: 24, paddingTop: 8, fontSize: 11 }}>
+        Issued By: {certificate.issuedBy.name} &nbsp;&nbsp; Date: {issueDate}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 48 }}>
+        <div style={{ textAlign: 'center', width: 180, borderTop: '1px solid #000', paddingTop: 4, fontSize: 11 }}>
+          Class Teacher<br />Signature & Stamp
+        </div>
+        <div style={{ textAlign: 'center', width: 180, borderTop: '1px solid #000', paddingTop: 4, fontSize: 11 }}>
+          Principal<br />Signature & Stamp
+        </div>
+      </div>
+      <p style={{ textAlign: 'center', fontSize: 10, marginTop: 16, color: '#666' }}>
+        {school?.name} — This certificate is computer generated
+      </p>
+    </div>
+  )
+}
+
 function CertificateInner() {
   const params = useParams()
   const searchParams = useSearchParams()
@@ -568,6 +631,12 @@ function CertificateInner() {
       {type === CertificateType.CHARACTER && (
         <div className="page">
           <CharacterCertificate data={data} />
+        </div>
+      )}
+
+      {type === CertificateType.BONAFIDE && (
+        <div className="page">
+          <BonafideCertificate data={data} />
         </div>
       )}
     </>

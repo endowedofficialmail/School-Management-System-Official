@@ -27,6 +27,7 @@ export type PakistaniVoucherData = {
     registrationNumber: string
     guardianName: string
     guardianCNIC?: string | null
+    family?: { fid: string } | null
     class: { id: number; name: string; section: string }
   }
   items: { description: string; amount: number }[]
@@ -135,9 +136,7 @@ function SimpleCopy({
   const afterDue = withinDue + 350
   const dueDate = new Date(data.dueDate)
   const feeMonth = `${MONTHS[data.month - 1]} ${data.year}`
-  const familyNo = data.student.guardianCNIC
-    ? data.student.guardianCNIC.replace(/[^0-9]/g, '').slice(-4)
-    : ''
+  const familyNo = data.student.family?.fid ?? ''
 
   return (
     <div style={{
@@ -429,6 +428,7 @@ export function toPakistaniVoucherData(
       registrationNumber: raw.student.registrationNumber,
       guardianName: raw.student.guardianName,
       guardianCNIC: raw.student.guardianCNIC,
+      family: raw.student.family ?? null,
       class: raw.student.class,
     },
     items: (raw.items || []).map((i: { description: string; amount: number | string }) => ({

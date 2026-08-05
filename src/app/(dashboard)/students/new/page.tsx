@@ -35,6 +35,8 @@ function NewStudentForm() {
         guardianPhone: data.guardianPhone,
         dateOfBirth: data.dateOfBirth || undefined,
         guardianCNIC: data.guardianCNIC || undefined,
+        studentCNIC: data.studentCNIC || undefined,
+        photoBase64: data.photoBase64 || undefined,
         address: data.address || undefined,
         admissionDate: data.admissionDate || undefined,
         status: data.status,

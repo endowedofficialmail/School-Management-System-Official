@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { revalidatePath } from 'next/cache'
 import { Gender, StudentStatus } from '@prisma/client'
 import { createPortalAccountsForStudent, type PortalCredentials } from '@/lib/actions/bulk-import'
+import { linkStudentToFamily } from '@/lib/actions/family'
 
 export type StudentWithClass = Awaited<ReturnType<typeof getStudents>>[number]
 export type ClassWithYear = Awaited<ReturnType<typeof getClasses>>[number]
@@ -52,6 +53,9 @@ export async function getStudentById(id: number) {
       class: {
         include: { academicYear: true },
       },
+      family: {
+        select: { fid: true },
+      },
     },
   })
 }
@@ -78,6 +82,8 @@ export interface CreateStudentInput {
   guardianPhone: string
   dateOfBirth?: string
   guardianCNIC?: string
+  studentCNIC?: string
+  photoBase64?: string
   address?: string
   admissionDate?: string
   status?: StudentStatus
@@ -100,6 +106,8 @@ export async function createStudent(data: CreateStudentInput): Promise<{
       guardianPhone: data.guardianPhone,
       dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : null,
       guardianCNIC: data.guardianCNIC || null,
+      studentCNIC: data.studentCNIC || null,
+      photoBase64: data.photoBase64 || null,
       address: data.address || null,
       admissionDate: data.admissionDate ? new Date(data.admissionDate) : new Date(),
       status: data.status ?? 'ACTIVE',
@@ -111,6 +119,14 @@ export async function createStudent(data: CreateStudentInput): Promise<{
     portalCredentials = await createPortalAccountsForStudent(student.id)
   } catch (e) {
     console.error('Portal account creation failed:', e)
+  }
+
+  if (data.guardianCNIC && data.guardianCNIC.trim().length > 0) {
+    try {
+      await linkStudentToFamily(student.id, data.guardianCNIC)
+    } catch (e) {
+      console.error('Family linking failed:', e)
+    }
   }
 
   revalidatePath('/students')
@@ -127,12 +143,19 @@ export interface UpdateStudentInput {
   guardianPhone?: string
   dateOfBirth?: string
   guardianCNIC?: string
+  studentCNIC?: string
+  photoBase64?: string
   address?: string
   admissionDate?: string
   status?: StudentStatus
 }
 
 export async function updateStudent(id: number, data: UpdateStudentInput) {
+  const existing = await prisma.student.findUnique({
+    where: { id },
+    select: { guardianCNIC: true },
+  })
+
   const student = await prisma.student.update({
     where: { id },
     data: {
@@ -146,11 +169,25 @@ export async function updateStudent(id: number, data: UpdateStudentInput) {
         dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : null,
       }),
       ...(data.guardianCNIC !== undefined && { guardianCNIC: data.guardianCNIC || null }),
+      ...(data.studentCNIC !== undefined && { studentCNIC: data.studentCNIC || null }),
+      ...(data.photoBase64 !== undefined && { photoBase64: data.photoBase64 || null }),
       ...(data.address !== undefined && { address: data.address || null }),
       ...(data.admissionDate && { admissionDate: new Date(data.admissionDate) }),
       ...(data.status && { status: data.status }),
     },
   })
+
+  if (
+    data.guardianCNIC !== undefined &&
+    data.guardianCNIC &&
+    data.guardianCNIC !== existing?.guardianCNIC
+  ) {
+    try {
+      await linkStudentToFamily(id, data.guardianCNIC)
+    } catch (e) {
+      console.error('Family re-linking failed:', e)
+    }
+  }
 
   revalidatePath('/students')
   revalidatePath(`/students/${id}`)
