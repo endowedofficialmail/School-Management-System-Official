@@ -14,6 +14,8 @@ import {
 } from '@/lib/actions/quizzes'
 
 type QuizData = Awaited<ReturnType<typeof getQuizForAttempt>>
+// Exclude the error-shape variant so quiz state always has quiz fields
+type QuizInfo = Exclude<QuizData, { error: string }>
 
 type QuizResultItem = {
   questionId: number
@@ -53,7 +55,7 @@ export default function QuizAttemptClient({
   userId: number
 }) {
   const [loading, setLoading] = useState(true)
-  const [quiz, setQuiz] = useState<QuizData | null>(null)
+  const [quiz, setQuiz] = useState<QuizInfo | null>(null)
   const [attemptId, setAttemptId] = useState<number | null>(null)
   const [startedAt, setStartedAt] = useState<Date | null>(null)
   const [current, setCurrent] = useState(0)
@@ -151,7 +153,7 @@ export default function QuizAttemptClient({
 
         // Step 4: start or resume the attempt
         const attempt = await startQuizAttempt(quizId, userId)
-        setQuiz(quizData)
+        setQuiz(quizData as QuizInfo)
         setAttemptId(attempt.id)
         setStartedAt(new Date(attempt.startedAt))
         const durationMs = quizData.duration * 60 * 1000
