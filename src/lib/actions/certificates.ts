@@ -1,7 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
-import { CertificateStatus, CertificateType } from '@prisma/client'
+import { CertificateStatus, CertificateType, Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 
 export type CertificateWithRelations = Awaited<ReturnType<typeof getCertificates>>[number]
@@ -207,7 +207,7 @@ export async function getTeacherLetters(filters?: {
   search?: string
 }) {
   const teacherTypes: CertificateType[] = ['OFFER_LETTER', 'EXPERIENCE_LETTER', 'RESIGNATION_LETTER']
-  const where: Parameters<typeof prisma.certificate.findMany>[0]['where'] = {
+  const where: Prisma.CertificateWhereInput = {
     type: filters?.type ?? { in: teacherTypes },
   }
   if (filters?.status) where.status = filters.status

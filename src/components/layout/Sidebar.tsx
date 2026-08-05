@@ -19,6 +19,7 @@ import {
   Bell,
   ClipboardList,
   GitBranch,
+  BookMarked,
 } from 'lucide-react'
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'

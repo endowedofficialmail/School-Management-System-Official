@@ -180,7 +180,7 @@ export async function retroactivelyLinkFamilies() {
   let familiesCreated = 0
   let studentsLinked = 0
 
-  for (const [cnic, ids] of groups) {
+  for (const [cnic, ids] of Array.from(groups.entries())) {
     const before = await prisma.family.findUnique({ where: { guardianCNIC: cnic } })
     const family = await findOrCreateFamily(cnic)
     if (!before) familiesCreated++

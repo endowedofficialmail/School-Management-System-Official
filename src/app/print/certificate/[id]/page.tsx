@@ -9,10 +9,33 @@ import { dateToWords, getDateWithDayName } from '@/lib/utils'
 
 type CertRow = NonNullable<NonNullable<Awaited<ReturnType<typeof getCertificateById>>>['certificate']>
 type SchoolRow = NonNullable<Awaited<ReturnType<typeof getCertificateById>>>['school']
+type CertStudent = NonNullable<CertRow['student']>
 
 type CertData = {
   certificate: CertRow
   school: SchoolRow
+}
+
+/** Certificate data with a required student relation (student certificates only). */
+type StudentCertData = {
+  certificate: CertRow & { student: CertStudent }
+  school: SchoolRow
+}
+
+function asStudentCertData(data: CertData): StudentCertData | null {
+  if (!data.certificate.student) return null
+  return {
+    certificate: data.certificate as StudentCertData['certificate'],
+    school: data.school,
+  }
+}
+
+function NotFoundMessage({ message }: { message: string }) {
+  return (
+    <div style={{ display: 'flex', minHeight: '100vh', alignItems: 'center', justifyContent: 'center' }}>
+      <p>{message}</p>
+    </div>
+  )
 }
 
 function underline(value?: string | null, blank = false, minWidth = 180) {
@@ -72,7 +95,7 @@ function SchoolLeavingCertificate({
   data,
   style,
 }: {
-  data: CertData
+  data: StudentCertData
   style: 'digital' | 'template'
 }) {
   const certificate = data.certificate
@@ -251,7 +274,7 @@ function SchoolLeavingCertificate({
   )
 }
 
-function BirthCopy({ data }: { data: CertData }) {
+function BirthCopy({ data }: { data: StudentCertData }) {
   const certificate = data.certificate
   const school = data.school
   const student = certificate.student
@@ -401,7 +424,7 @@ function BirthCopy({ data }: { data: CertData }) {
   )
 }
 
-function CharacterCertificate({ data }: { data: CertData }) {
+function CharacterCertificate({ data }: { data: StudentCertData }) {
   const certificate = data.certificate
   const school = data.school
   const student = certificate.student
@@ -468,10 +491,10 @@ function CharacterCertificate({ data }: { data: CertData }) {
   )
 }
 
-function BonafideCertificate({ data }: { data: CertData }) {
+function BonafideCertificate({ data }: { data: StudentCertData }) {
   const certificate = data.certificate
   const school = data.school
-  const student = certificate.student!
+  const student = certificate.student
   const fullName = `${student.firstName} ${student.lastName}`.toUpperCase()
   const issueDate = new Date(certificate.issueDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
 
@@ -580,6 +603,18 @@ function CertificateInner() {
 
   const type = data.certificate.type
 
+  const studentCertTypes: CertificateType[] = [
+    CertificateType.BIRTH,
+    CertificateType.SCHOOL_LEAVING,
+    CertificateType.CHARACTER,
+    CertificateType.BONAFIDE,
+  ]
+
+  const studentData = studentCertTypes.includes(type) ? asStudentCertData(data) : null
+  if (studentCertTypes.includes(type) && !studentData) {
+    return <NotFoundMessage message="Student data not found for this certificate." />
+  }
+
   return (
     <>
       <style>{`
@@ -614,29 +649,29 @@ function CertificateInner() {
         </button>
       </div>
 
-      {type === CertificateType.BIRTH && (
+      {type === CertificateType.BIRTH && studentData && (
         <div className="birth-page">
-          <BirthCopy data={data} />
+          <BirthCopy data={studentData} />
           <div className="cut-line">- - - - - - - - - - CUT HERE - - - - - - - - - - ✂</div>
-          <BirthCopy data={data} />
+          <BirthCopy data={studentData} />
         </div>
       )}
 
-      {type === CertificateType.SCHOOL_LEAVING && (
+      {type === CertificateType.SCHOOL_LEAVING && studentData && (
         <div className="page">
-          <SchoolLeavingCertificate data={data} style={style} />
+          <SchoolLeavingCertificate data={studentData} style={style} />
         </div>
       )}
 
-      {type === CertificateType.CHARACTER && (
+      {type === CertificateType.CHARACTER && studentData && (
         <div className="page">
-          <CharacterCertificate data={data} />
+          <CharacterCertificate data={studentData} />
         </div>
       )}
 
-      {type === CertificateType.BONAFIDE && (
+      {type === CertificateType.BONAFIDE && studentData && (
         <div className="page">
-          <BonafideCertificate data={data} />
+          <BonafideCertificate data={studentData} />
         </div>
       )}
     </>
