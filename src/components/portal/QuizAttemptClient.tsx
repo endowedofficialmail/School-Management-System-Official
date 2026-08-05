@@ -70,15 +70,55 @@ export default function QuizAttemptClient({
       try {
         const { getQuizResults } = await import('@/lib/actions/quizzes')
 
-        // If already completed and results are visible, show them
-        try {
-          const existing = await getQuizResults(quizId, userId, 'STUDENT')
-          if (existing.attempt?.isCompleted) {
+        // Step 1: check if already completed with visible results
+        const existing = await getQuizResults(quizId, userId, 'STUDENT')
+        if (existing.attempt?.isCompleted) {
+          setResult({
+            submitted: true,
+            showResults: true,
+            attempt: existing.attempt,
+            results: existing.attempt.answers.map((a) => ({
+              questionId: a.questionId,
+              questionText: a.question.questionText,
+              questionType: a.question.questionType,
+              marks: a.question.marks,
+              marksAwarded: a.marksAwarded,
+              isCorrect: a.isCorrect,
+              explanation: a.question.explanation,
+              selectedOptionId: a.selectedOptionId,
+              textAnswer: a.textAnswer,
+              correctOption: a.question.options.find((o) => o.isCorrect) ?? null,
+              options: a.question.options.map((o) => ({
+                id: o.id,
+                optionText: o.optionText,
+                isCorrect: o.isCorrect,
+              })),
+            })),
+          })
+          setLoading(false)
+          return
+        }
+
+        // Step 2: load quiz data (returns { error } instead of throwing)
+        const quizData = await getQuizForAttempt(quizId, userId)
+
+        // Handle structured error from server action
+        if ('error' in quizData) {
+          setError(quizData.error)
+          setLoading(false)
+          return
+        }
+
+        // Step 3: already submitted but results not shown yet
+        if (quizData.isCompleted) {
+          // Try once more in case results just became available
+          const refreshed = await getQuizResults(quizId, userId, 'STUDENT')
+          if (refreshed.attempt?.isCompleted) {
             setResult({
               submitted: true,
               showResults: true,
-              attempt: existing.attempt,
-              results: existing.attempt.answers.map((a) => ({
+              attempt: refreshed.attempt,
+              results: refreshed.attempt.answers.map((a) => ({
                 questionId: a.questionId,
                 questionText: a.question.questionText,
                 questionType: a.question.questionType,
@@ -96,48 +136,9 @@ export default function QuizAttemptClient({
                 })),
               })),
             })
-            setLoading(false)
-            return
+          } else {
+            setResult({ submitted: true, showResults: false })
           }
-        } catch {
-          // no completed results yet — continue to start or resume attempt
-        }
-
-        const quizData = await getQuizForAttempt(quizId, userId)
-
-        if (quizData.isCompleted) {
-          try {
-            const existing = await getQuizResults(quizId, userId, 'STUDENT')
-            if (existing.attempt?.isCompleted) {
-              setResult({
-                submitted: true,
-                showResults: true,
-                attempt: existing.attempt,
-                results: existing.attempt.answers.map((a) => ({
-                  questionId: a.questionId,
-                  questionText: a.question.questionText,
-                  questionType: a.question.questionType,
-                  marks: a.question.marks,
-                  marksAwarded: a.marksAwarded,
-                  isCorrect: a.isCorrect,
-                  explanation: a.question.explanation,
-                  selectedOptionId: a.selectedOptionId,
-                  textAnswer: a.textAnswer,
-                  correctOption: a.question.options.find((o) => o.isCorrect) ?? null,
-                  options: a.question.options.map((o) => ({
-                    id: o.id,
-                    optionText: o.optionText,
-                    isCorrect: o.isCorrect,
-                  })),
-                })),
-              })
-              setLoading(false)
-              return
-            }
-          } catch {
-            // ignore — fall through to "results not available" message
-          }
-          setError('This quiz has already been submitted. Results are not available yet.')
           setLoading(false)
           return
         }
@@ -148,6 +149,7 @@ export default function QuizAttemptClient({
           return
         }
 
+        // Step 4: start or resume the attempt
         const attempt = await startQuizAttempt(quizId, userId)
         setQuiz(quizData)
         setAttemptId(attempt.id)

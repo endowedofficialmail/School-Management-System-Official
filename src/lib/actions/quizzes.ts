@@ -646,12 +646,12 @@ export async function startQuizAttempt(quizId: number, userId: number) {
     where: { id: quizId },
     include: { course: { select: { classId: true } }, questions: true },
   })
-  if (!quiz || !quiz.isPublished) throw new Error('Quiz not found')
-  if (quiz.course.classId !== student.classId) throw new Error('Unauthorized')
+  if (!quiz || !quiz.isPublished) throw new Error('Quiz not found or not published.')
+  if (quiz.course.classId !== student.classId) throw new Error('You are not enrolled in the class for this quiz.')
 
   const now = new Date()
-  if (quiz.startTime && now < quiz.startTime) throw new Error('This quiz is not available yet')
-  if (quiz.endTime && now > quiz.endTime) throw new Error('This quiz has closed')
+  if (quiz.startTime && now < quiz.startTime) throw new Error('This quiz is not available yet.')
+  if (quiz.endTime && now > quiz.endTime) throw new Error('This quiz has closed.')
 
   const existing = await prisma.quizAttempt.findUnique({
     where: { quizId_studentId: { quizId, studentId: student.id } },
