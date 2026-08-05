@@ -537,7 +537,9 @@ export async function getQuizForAttempt(quizId: number, userId: number) {
       },
     },
   })
-  if (!quiz || !quiz.isPublished) throw new Error('Quiz not found')
+  if (!quiz || !quiz.isPublished || !quiz.course.isPublished) {
+    throw new Error('Quiz not found')
+  }
   if (quiz.course.classId !== student.classId) throw new Error('Unauthorized')
 
   const now = new Date()
@@ -547,21 +549,44 @@ export async function getQuizForAttempt(quizId: number, userId: number) {
   const existing = await prisma.quizAttempt.findUnique({
     where: { quizId_studentId: { quizId, studentId: student.id } },
   })
-  if (existing?.isCompleted) {
-    throw new Error('You have already completed this quiz')
+
+  const isCompleted = Boolean(existing?.isCompleted)
+
+  // Already submitted and no retakes — client should show results or a submitted message
+  if (isCompleted && quiz.allowedAttempts <= 1) {
+    return {
+      id: quiz.id,
+      title: quiz.title,
+      description: quiz.description,
+      duration: quiz.duration,
+      totalMarks: Number(quiz.totalMarks),
+      passingMarks: Number(quiz.passingMarks),
+      showResultsImmediately: quiz.showResultsImmediately,
+      courseTitle: quiz.course.title,
+      questions: [] as Array<{
+        id: number
+        questionText: string
+        questionType: string
+        marks: number
+        order: number
+        options: { id: number; optionText: string; order: number }[]
+      }>,
+      isCompleted: true,
+      existingAttemptId: existing?.id ?? null,
+      existingStartedAt: existing?.startedAt?.toISOString() ?? null,
+    }
   }
 
   let questions = quiz.questions.map((q) => ({
     id: q.id,
     questionText: q.questionText,
     questionType: q.questionType,
-    marks: q.marks,
+    marks: Number(q.marks),
     order: q.order,
     options: q.options.map((o) => ({
       id: o.id,
       optionText: o.optionText,
       order: o.order,
-      // intentionally omit isCorrect
     })),
   }))
 
@@ -576,13 +601,14 @@ export async function getQuizForAttempt(quizId: number, userId: number) {
     title: quiz.title,
     description: quiz.description,
     duration: quiz.duration,
-    totalMarks: quiz.totalMarks,
-    passingMarks: quiz.passingMarks,
+    totalMarks: Number(quiz.totalMarks),
+    passingMarks: Number(quiz.passingMarks),
     showResultsImmediately: quiz.showResultsImmediately,
     courseTitle: quiz.course.title,
     questions,
+    isCompleted: false,
     existingAttemptId: existing?.id ?? null,
-    existingStartedAt: existing?.startedAt ?? null,
+    existingStartedAt: existing?.startedAt?.toISOString() ?? null,
   }
 }
 
@@ -802,7 +828,14 @@ export async function submitQuiz(attemptId: number, userId: number) {
   return {
     submitted: true,
     showResults: true as const,
-    attempt: updated,
+    attempt: {
+      id: updated.id,
+      marksAwarded: Number(updated.marksAwarded),
+      totalMarks: Number(updated.totalMarks),
+      percentage: Number(updated.percentage),
+      isPassed: updated.isPassed,
+      timeSpent: updated.timeSpent,
+    },
     results: updated.answers.map((a) => ({
       questionId: a.questionId,
       questionText: a.question.questionText,
@@ -840,11 +873,39 @@ export async function autoSubmitExpiredAttempt(attemptId: number, userId?: numbe
   const updated = await gradeAndCompleteAttempt(attemptId, true)
   revalidateQuizPaths(attempt.quiz.courseId)
 
+  if (!attempt.quiz.showResultsImmediately || !updated) {
+    return { submitted: true, timedOut: true, showResults: false as const }
+  }
+
   return {
     submitted: true,
     timedOut: true,
-    showResults: attempt.quiz.showResultsImmediately,
-    attempt: updated,
+    showResults: true as const,
+    attempt: {
+      id: updated.id,
+      marksAwarded: Number(updated.marksAwarded),
+      totalMarks: Number(updated.totalMarks),
+      percentage: Number(updated.percentage),
+      isPassed: updated.isPassed,
+      timeSpent: updated.timeSpent,
+    },
+    results: updated.answers.map((a) => ({
+      questionId: a.questionId,
+      questionText: a.question.questionText,
+      questionType: a.question.questionType,
+      marks: Number(a.question.marks),
+      marksAwarded: a.marksAwarded != null ? Number(a.marksAwarded) : null,
+      isCorrect: a.isCorrect,
+      explanation: a.question.explanation,
+      selectedOptionId: a.selectedOptionId,
+      textAnswer: a.textAnswer,
+      correctOption: a.question.options.find((o) => o.isCorrect) ?? null,
+      options: a.question.options.map((o) => ({
+        id: o.id,
+        optionText: o.optionText,
+        isCorrect: o.isCorrect,
+      })),
+    })),
   }
 }
 
@@ -932,7 +993,40 @@ export async function getQuizResults(quizId: number, userId: number, role: strin
       },
     })
     if (!attempt?.isCompleted) throw new Error('No completed attempt found')
-    return { quiz, attempt }
+    return {
+      quiz: {
+        id: quiz.id,
+        title: quiz.title,
+        showResultsImmediately: quiz.showResultsImmediately,
+      },
+      attempt: {
+        id: attempt.id,
+        isCompleted: attempt.isCompleted,
+        marksAwarded: Number(attempt.marksAwarded),
+        totalMarks: Number(attempt.totalMarks),
+        percentage: Number(attempt.percentage),
+        isPassed: attempt.isPassed,
+        timeSpent: attempt.timeSpent,
+        answers: attempt.answers.map((a) => ({
+          questionId: a.questionId,
+          selectedOptionId: a.selectedOptionId,
+          textAnswer: a.textAnswer,
+          marksAwarded: a.marksAwarded != null ? Number(a.marksAwarded) : null,
+          isCorrect: a.isCorrect,
+          question: {
+            questionText: a.question.questionText,
+            questionType: a.question.questionType,
+            marks: Number(a.question.marks),
+            explanation: a.question.explanation,
+            options: a.question.options.map((o) => ({
+              id: o.id,
+              optionText: o.optionText,
+              isCorrect: o.isCorrect,
+            })),
+          },
+        })),
+      },
+    }
   }
 
   if (role !== 'ADMIN' && role !== 'TEACHER') throw new Error('Unauthorized')
