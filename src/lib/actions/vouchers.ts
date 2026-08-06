@@ -807,7 +807,7 @@ export async function generateVouchersForClass(data: {
     throw new Error('No active students found in this class')
   }
 
-  const months = [...new Set(data.months)].sort((a, b) => a - b)
+  const months = Array.from(new Set(data.months)).sort((a, b) => a - b)
   const dueDay = new Date(data.dueDate).getDate()
 
   let totalCreated = 0
