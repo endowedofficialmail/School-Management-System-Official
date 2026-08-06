@@ -38,6 +38,7 @@ import {
   generateVoucherForStudent, generateVouchersForSchool,
   resetVoucherPayment, cancelVoucher, deleteVoucher, getSchoolGenerationPreview,
   getStudentsWithFeeOverrides, saveStudentFeeOverrides,
+  getEffectiveFeeAmountsForStudent,
   type VoucherWithDetails,
 } from '@/lib/actions/vouchers'
 import { getFeeStructures } from '@/lib/actions/fees'
@@ -75,6 +76,7 @@ type FeeStructure = Awaited<ReturnType<typeof getFeeStructures>>[number]
 type ClassItem = Awaited<ReturnType<typeof getClasses>>[number]
 type StudentItem = Awaited<ReturnType<typeof getStudents>>[number]
 type SchoolGenResult = Awaited<ReturnType<typeof generateVouchersForSchool>>
+type EffectiveFeeAmount = Awaited<ReturnType<typeof getEffectiveFeeAmountsForStudent>>[number]
 
 interface StudentFeeRow {
   studentId: number
@@ -159,6 +161,8 @@ export default function FeeVouchersPage() {
     year: number
     studentName: string
   } | null>(null)
+  const [effectiveAmounts, setEffectiveAmounts] = useState<EffectiveFeeAmount[]>([])
+  const [loadingEffectiveAmounts, setLoadingEffectiveAmounts] = useState(false)
 
   const [schoolForm, setSchoolForm] = useState({
     month: String(CURRENT_MONTH),
@@ -264,11 +268,6 @@ export default function FeeVouchersPage() {
     return feeStructures.filter((f) => !f.classId || f.classId === studentForm.classId)
   }, [feeStructures, studentForm.classId])
 
-  const studentSelectedStructures = useMemo(
-    () => studentFeeStructures.filter((f) => studentForm.feeStructureIds.includes(f.id)),
-    [studentFeeStructures, studentForm.feeStructureIds]
-  )
-
   const studentCustomItems = useMemo(
     () =>
       studentForm.items
@@ -280,9 +279,14 @@ export default function FeeVouchersPage() {
     [studentForm.items]
   )
 
+  const studentSelectedEffectiveAmounts = useMemo(
+    () => effectiveAmounts.filter((e) => studentForm.feeStructureIds.includes(e.feeStructureId)),
+    [effectiveAmounts, studentForm.feeStructureIds]
+  )
+
   const studentFeeStructureTotal = useMemo(
-    () => studentSelectedStructures.reduce((s, f) => s + Number(f.amount), 0),
-    [studentSelectedStructures]
+    () => studentSelectedEffectiveAmounts.reduce((s, e) => s + e.effectiveAmount, 0),
+    [studentSelectedEffectiveAmounts]
   )
 
   const studentCustomItemsTotal = useMemo(
@@ -295,6 +299,41 @@ export default function FeeVouchersPage() {
   const allStudentFeesSelected =
     studentFeeStructures.length > 0 &&
     studentForm.feeStructureIds.length === studentFeeStructures.length
+
+  useEffect(() => {
+    if (!studentDialogOpen || studentGenResult) return
+
+    async function fetchEffectiveAmounts() {
+      if (!studentForm.studentId || studentFeeStructures.length === 0) {
+        setEffectiveAmounts([])
+        return
+      }
+
+      setLoadingEffectiveAmounts(true)
+      try {
+        const amounts = await getEffectiveFeeAmountsForStudent(
+          Number(studentForm.studentId),
+          studentFeeStructures.map((f) => f.id),
+          Number(studentForm.month),
+          Number(studentForm.year)
+        )
+        setEffectiveAmounts(amounts)
+      } catch {
+        setEffectiveAmounts([])
+      } finally {
+        setLoadingEffectiveAmounts(false)
+      }
+    }
+
+    void fetchEffectiveAmounts()
+  }, [
+    studentDialogOpen,
+    studentGenResult,
+    studentForm.studentId,
+    studentForm.month,
+    studentForm.year,
+    studentFeeStructures,
+  ])
 
   const schoolAllClassFees = useMemo(
     () => feeStructures.filter((f) => f.classId == null),
@@ -612,6 +651,8 @@ export default function FeeVouchersPage() {
     setStudentSearch('')
     setStudentOptions([])
     setStudentGenResult(null)
+    setEffectiveAmounts([])
+    setLoadingEffectiveAmounts(false)
     setGeneratingStudent(false)
   }
 
@@ -1488,23 +1529,58 @@ export default function FeeVouchersPage() {
                       Select All
                     </label>
                   </div>
-                  <div className="rounded-lg border p-3 space-y-2 max-h-48 overflow-y-auto">
+                  <div className="rounded-lg border p-3 space-y-1 max-h-48 overflow-y-auto">
                     {studentFeeStructures.length === 0 ? (
                       <p className="text-sm text-muted-foreground">No fee structures found.</p>
+                    ) : loadingEffectiveAmounts && studentForm.studentId ? (
+                      <p className="text-sm text-muted-foreground flex items-center gap-2 py-2">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading fee amounts…
+                      </p>
                     ) : (
-                      studentFeeStructures.map((f) => (
-                        <label key={f.id} className="flex items-center gap-2 cursor-pointer text-sm">
-                          <input
-                            type="checkbox"
-                            checked={studentForm.feeStructureIds.includes(f.id)}
-                            onChange={() => toggleStudentFeeStructure(f.id)}
-                            className="rounded"
-                          />
-                          <span className="flex-1">{f.name}</span>
-                          <Badge variant="secondary" className="text-[10px]">{f.frequency}</Badge>
-                          <span className="text-muted-foreground">{formatRs(Number(f.amount))}</span>
-                        </label>
-                      ))
+                      studentFeeStructures.map((f) => {
+                        const effectiveData = effectiveAmounts.find((e) => e.feeStructureId === f.id)
+                        const hasOverride = effectiveData?.hasOverride ?? false
+                        const effectiveAmount = effectiveData?.effectiveAmount ?? Number(f.amount)
+
+                        return (
+                          <label
+                            key={f.id}
+                            className="flex items-center gap-3 p-2 rounded hover:bg-muted/50 cursor-pointer text-sm"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={studentForm.feeStructureIds.includes(f.id)}
+                              onChange={() => toggleStudentFeeStructure(f.id)}
+                              className="rounded"
+                            />
+                            <span className="flex-1">{f.name}</span>
+                            <Badge variant="secondary" className="text-[10px] shrink-0">
+                              {f.frequency}
+                            </Badge>
+                            <div className="text-right shrink-0 min-w-[90px]">
+                              {hasOverride && studentForm.studentId && (
+                                <span className="text-xs text-muted-foreground line-through block">
+                                  {formatRs(Number(f.amount))}
+                                </span>
+                              )}
+                              <span
+                                className={cn(
+                                  'text-sm font-medium',
+                                  hasOverride && studentForm.studentId && 'text-blue-600'
+                                )}
+                              >
+                                {formatRs(effectiveAmount)}
+                              </span>
+                              {hasOverride && effectiveData?.overrideType && studentForm.studentId && (
+                                <span className="text-xs text-blue-500 block">
+                                  ({effectiveData.overrideType} override)
+                                </span>
+                              )}
+                            </div>
+                          </label>
+                        )
+                      })
                     )}
                   </div>
                 </div>
@@ -1568,25 +1644,62 @@ export default function FeeVouchersPage() {
                   </Button>
                 </div>
 
-                {(studentSelectedStructures.length > 0 || studentCustomItems.length > 0) && (
-                  <div className="rounded-lg border bg-slate-50 p-3 space-y-1.5 text-sm">
-                    <p className="font-semibold text-slate-800">Fee Summary:</p>
-                    {studentSelectedStructures.map((f) => (
-                      <div key={f.id} className="flex justify-between gap-2">
-                        <span className="text-muted-foreground">{f.name}</span>
-                        <span>{formatRs(Number(f.amount))}</span>
+                {(studentSelectedEffectiveAmounts.length > 0 || studentCustomItems.length > 0) && (
+                  <div className="rounded-lg border bg-slate-50 p-4 space-y-2 text-sm">
+                    <p className="font-semibold text-slate-700">Fee Summary:</p>
+
+                    {studentSelectedEffectiveAmounts.map((item) => (
+                      <div key={item.feeStructureId} className="flex justify-between items-center gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span>{item.name}</span>
+                          {item.hasOverride && (
+                            <span
+                              className={cn(
+                                'text-xs px-2 py-0.5 rounded-full font-medium shrink-0',
+                                item.overrideType === 'year'
+                                  ? 'bg-blue-100 text-blue-700'
+                                  : 'bg-orange-100 text-orange-700'
+                              )}
+                            >
+                              {item.overrideType === 'year' ? 'Year Override' : 'Month Override'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-right shrink-0">
+                          {item.hasOverride && (
+                            <span className="text-xs text-muted-foreground line-through mr-2">
+                              {formatRs(item.baseAmount)}
+                            </span>
+                          )}
+                          <span
+                            className={cn(
+                              'font-medium',
+                              item.hasOverride ? 'text-blue-600' : 'text-slate-900'
+                            )}
+                          >
+                            {formatRs(item.effectiveAmount)}
+                          </span>
+                        </div>
                       </div>
                     ))}
+
                     {studentCustomItems.map((item, idx) => (
                       <div key={`c-${idx}`} className="flex justify-between gap-2">
-                        <span className="text-muted-foreground">{item.description}</span>
-                        <span>{formatRs(item.amount)}</span>
+                        <span>{item.description}</span>
+                        <span className="font-medium">{formatRs(item.amount)}</span>
                       </div>
                     ))}
-                    <div className="border-t pt-1.5 flex justify-between font-semibold">
+
+                    <div className="border-t pt-2 flex justify-between font-bold">
                       <span>TOTAL</span>
                       <span>{formatRs(studentGrandTotal)}</span>
                     </div>
+
+                    {studentSelectedEffectiveAmounts.some((i) => i.hasOverride) && (
+                      <p className="text-xs text-blue-600 mt-1">
+                        This student has custom fee overrides applied. Overridden amounts are shown above.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

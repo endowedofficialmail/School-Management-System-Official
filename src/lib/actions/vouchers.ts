@@ -558,6 +558,90 @@ export async function getStudentFeeAmount(
   return defaultAmount
 }
 
+export async function getEffectiveFeeAmountsForStudent(
+  studentId: number,
+  feeStructureIds: number[],
+  month: number,
+  year: number
+): Promise<{
+  feeStructureId: number
+  name: string
+  baseAmount: number
+  effectiveAmount: number
+  hasOverride: boolean
+  overrideType: 'month' | 'year' | null
+}[]> {
+  if (feeStructureIds.length === 0) return []
+
+  const feeStructures = await prisma.feeStructure.findMany({
+    where: { id: { in: feeStructureIds } },
+    select: { id: true, name: true, amount: true },
+  })
+
+  const activeYear = await prisma.academicYear.findFirst({
+    where: { isActive: true },
+    select: { id: true },
+  })
+
+  return Promise.all(
+    feeStructures.map(async (fs) => {
+      const baseAmount = Number(fs.amount)
+
+      const monthOverride = await prisma.studentFeeOverride.findFirst({
+        where: {
+          studentId,
+          description: { equals: fs.name, mode: 'insensitive' },
+          isYearLong: false,
+          month,
+          year,
+        },
+      })
+
+      if (monthOverride) {
+        return {
+          feeStructureId: fs.id,
+          name: fs.name,
+          baseAmount,
+          effectiveAmount: Number(monthOverride.amount),
+          hasOverride: true,
+          overrideType: 'month' as const,
+        }
+      }
+
+      if (activeYear) {
+        const yearOverride = await prisma.studentFeeOverride.findFirst({
+          where: {
+            studentId,
+            description: { equals: fs.name, mode: 'insensitive' },
+            isYearLong: true,
+            academicYearId: activeYear.id,
+          },
+        })
+
+        if (yearOverride) {
+          return {
+            feeStructureId: fs.id,
+            name: fs.name,
+            baseAmount,
+            effectiveAmount: Number(yearOverride.amount),
+            hasOverride: true,
+            overrideType: 'year' as const,
+          }
+        }
+      }
+
+      return {
+        feeStructureId: fs.id,
+        name: fs.name,
+        baseAmount,
+        effectiveAmount: baseAmount,
+        hasOverride: false,
+        overrideType: null,
+      }
+    })
+  )
+}
+
 async function buildFeeItemsWithOverrides(
   studentId: number,
   feeStructures: { name: string; amount: unknown }[],
@@ -906,24 +990,32 @@ export async function generateVoucherForStudent(data: {
         })
       : []
 
-  const structureItems = feeStructures.map((fs) => ({
-    description: fs.name,
-    amount: Number(fs.amount),
-  }))
-
   const customItems = (data.customItems ?? []).filter(
     (item) => item.description.trim().length > 0 && item.amount > 0
   )
 
-  const allItems = [...structureItems, ...customItems]
-
-  if (allItems.length === 0) {
+  if (feeStructures.length === 0 && customItems.length === 0) {
     throw new Error('Please select at least one fee structure or add a custom item')
   }
 
-  // Apply student fee overrides for matching descriptions (fee structures + custom)
-  const feeItems = await Promise.all(
-    allItems.map(async (item) => ({
+  const structureItems = await Promise.all(
+    feeStructures.map(async (fs) => {
+      const actualAmount = await getStudentFeeAmount(
+        data.studentId,
+        fs.name,
+        data.month,
+        data.year,
+        Number(fs.amount)
+      )
+      return {
+        description: fs.name,
+        amount: actualAmount,
+      }
+    })
+  )
+
+  const customItemsWithOverrides = await Promise.all(
+    customItems.map(async (item) => ({
       description: item.description,
       amount: await getStudentFeeAmount(
         data.studentId,
@@ -934,6 +1026,8 @@ export async function generateVoucherForStudent(data: {
       ),
     }))
   )
+
+  const feeItems = [...structureItems, ...customItemsWithOverrides]
 
   const voucher = await createVoucherWithAdvance({
     studentId: data.studentId,
