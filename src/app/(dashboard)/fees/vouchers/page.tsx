@@ -37,10 +37,12 @@ import {
   getVouchers, getVoucherDashboardStats, generateVouchersForClass,
   generateVoucherForStudent, generateVouchersForSchool,
   resetVoucherPayment, cancelVoucher, deleteVoucher, getSchoolGenerationPreview,
+  getStudentsWithFeeOverrides, saveStudentFeeOverrides,
   type VoucherWithDetails,
 } from '@/lib/actions/vouchers'
 import { getFeeStructures } from '@/lib/actions/fees'
 import { getClasses, getStudents } from '@/lib/actions/students'
+import { getActiveAcademicYear } from '@/lib/actions/settings'
 
 const MONTHS = [
   { value: 1, label: 'January' }, { value: 2, label: 'February' }, { value: 3, label: 'March' },
@@ -73,6 +75,19 @@ type FeeStructure = Awaited<ReturnType<typeof getFeeStructures>>[number]
 type ClassItem = Awaited<ReturnType<typeof getClasses>>[number]
 type StudentItem = Awaited<ReturnType<typeof getStudents>>[number]
 type SchoolGenResult = Awaited<ReturnType<typeof generateVouchersForSchool>>
+
+interface StudentFeeRow {
+  studentId: number
+  studentName: string
+  regNumber: string
+  baseAmount: number
+  customAmount: number
+  initialAmount: number
+  overrideType: 'month' | 'year'
+  hasExistingYearOverride: boolean
+  hasExistingMonthOverride: boolean
+  isModified: boolean
+}
 
 function remainingFor(v: VoucherWithDetails) {
   if (v.status === 'PARTIAL') {
@@ -115,8 +130,11 @@ export default function FeeVouchersPage() {
     dueDate: format(new Date(CURRENT_YEAR, CURRENT_MONTH - 1, 10), 'yyyy-MM-dd'),
     feeStructureIds: [] as number[],
   })
-  const [classStudents, setClassStudents] = useState<StudentItem[]>([])
-  const [studentFeeMap, setStudentFeeMap] = useState<Record<number, { customAmount: number; applyTo: 'month' | 'year' }>>({})
+  const [studentFeeRows, setStudentFeeRows] = useState<StudentFeeRow[]>([])
+  const [studentsLoaded, setStudentsLoaded] = useState(false)
+  const [loadingStudents, setLoadingStudents] = useState(false)
+  const [feesApplied, setFeesApplied] = useState(false)
+  const [applyingFees, setApplyingFees] = useState(false)
   const [applyAllAmount, setApplyAllAmount] = useState('')
   const [generatingClass, setGeneratingClass] = useState(false)
 
@@ -185,6 +203,27 @@ export default function FeeVouchersPage() {
     setSchoolResult(null)
     getSchoolGenerationPreview().then(setSchoolPreview)
   }, [schoolDialogOpen])
+
+  function resetClassDialogState() {
+    setStudentFeeRows([])
+    setStudentsLoaded(false)
+    setFeesApplied(false)
+    setApplyingFees(false)
+    setApplyAllAmount('')
+    setLoadingStudents(false)
+  }
+
+  function openClassDialog() {
+    resetClassDialogState()
+    setClassForm({
+      classId: '',
+      selectedMonths: [CURRENT_MONTH],
+      year: String(CURRENT_YEAR),
+      dueDate: format(new Date(CURRENT_YEAR, CURRENT_MONTH - 1, 10), 'yyyy-MM-dd'),
+      feeStructureIds: [],
+    })
+    setClassDialogOpen(true)
+  }
 
   const filteredVouchers = useMemo(() => {
     if (!search.trim()) return vouchers
@@ -260,19 +299,11 @@ export default function FeeVouchersPage() {
   }
 
   useEffect(() => {
-    if (!classForm.classId) { setClassStudents([]); return }
-    getStudents({ classId: Number(classForm.classId), status: 'ACTIVE', fetchAll: true }).then((students) => {
-      setClassStudents(students)
-      const base = feeStructures
-        .filter((f) => classForm.feeStructureIds.includes(f.id))
-        .reduce((s, f) => s + Number(f.amount), 0)
-      const map: Record<number, { customAmount: number; applyTo: 'month' | 'year' }> = {}
-      for (const s of students) {
-        map[s.id] = { customAmount: base, applyTo: 'month' }
-      }
-      setStudentFeeMap(map)
-    })
-  }, [classForm.classId, classForm.feeStructureIds, feeStructures])
+    // Changing config invalidates the loaded student fee table
+    setStudentsLoaded(false)
+    setStudentFeeRows([])
+    setFeesApplied(false)
+  }, [classForm.classId, classForm.feeStructureIds, classForm.selectedMonths, classForm.year])
 
   const allMonthsSelected = classForm.selectedMonths.length === 12
 
@@ -292,62 +323,233 @@ export default function FeeVouchersPage() {
     }))
   }
 
+  function handleAmountChange(studentId: number, newAmount: number) {
+    setStudentFeeRows((prev) =>
+      prev.map((row) =>
+        row.studentId === studentId
+          ? {
+              ...row,
+              customAmount: newAmount,
+              isModified: newAmount !== row.baseAmount,
+            }
+          : row
+      )
+    )
+    setFeesApplied(false)
+  }
+
+  function handleOverrideTypeChange(studentId: number, overrideType: 'month' | 'year') {
+    setStudentFeeRows((prev) =>
+      prev.map((row) =>
+        row.studentId === studentId ? { ...row, overrideType } : row
+      )
+    )
+    setFeesApplied(false)
+  }
+
   function resetAllFeesToBase() {
-    const base = classPreviewTotal
-    setStudentFeeMap((prev) => {
-      const next = { ...prev }
-      for (const id of Object.keys(next)) {
-        next[Number(id)] = { ...next[Number(id)], customAmount: base }
-      }
-      return next
-    })
+    setStudentFeeRows((prev) =>
+      prev.map((row) => ({
+        ...row,
+        customAmount: row.baseAmount,
+        isModified: false,
+        overrideType: 'month',
+      }))
+    )
+    setFeesApplied(false)
   }
 
   function applySameAmountToAll() {
     const amt = parseFloat(applyAllAmount)
-    if (isNaN(amt)) return
-    setStudentFeeMap((prev) => {
-      const next = { ...prev }
-      for (const id of Object.keys(next)) {
-        next[Number(id)] = { ...next[Number(id)], customAmount: amt }
+    if (isNaN(amt)) {
+      toast.error('Enter a valid amount')
+      return
+    }
+    setStudentFeeRows((prev) =>
+      prev.map((row) => ({
+        ...row,
+        customAmount: amt,
+        isModified: amt !== row.baseAmount,
+      }))
+    )
+    setFeesApplied(false)
+  }
+
+  async function handleLoadStudents() {
+    if (!classForm.classId) {
+      toast.error('Please select a class first')
+      return
+    }
+    if (classForm.feeStructureIds.length === 0) {
+      toast.error('Please select at least one fee structure first')
+      return
+    }
+    if (classForm.selectedMonths.length === 0) {
+      toast.error('Please select at least one month first')
+      return
+    }
+
+    setLoadingStudents(true)
+    try {
+      const primaryMonth = classForm.selectedMonths[0]
+      const rows = await getStudentsWithFeeOverrides(
+        Number(classForm.classId),
+        primaryMonth,
+        Number(classForm.year),
+        classForm.feeStructureIds
+      )
+
+      if (rows.length === 0) {
+        toast.error('No active students found in this class')
+        setStudentFeeRows([])
+        setStudentsLoaded(false)
+        return
       }
-      return next
-    })
+
+      setStudentFeeRows(
+        rows.map((s) => ({
+          studentId: s.studentId,
+          studentName: `${s.firstName} ${s.lastName}`,
+          regNumber: s.registrationNumber,
+          baseAmount: s.baseAmount,
+          customAmount: s.effectiveAmount,
+          initialAmount: s.effectiveAmount,
+          overrideType: s.hasYearOverride ? 'year' : 'month',
+          hasExistingYearOverride: s.hasYearOverride,
+          hasExistingMonthOverride: s.hasMonthOverride,
+          isModified: s.effectiveAmount !== s.baseAmount,
+        }))
+      )
+      setStudentsLoaded(true)
+      // Loaded amounts already reflect DB (base or existing overrides)
+      setFeesApplied(true)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load students')
+    } finally {
+      setLoadingStudents(false)
+    }
+  }
+
+  async function handleApplyCustomFees() {
+    const modifiedRows = studentFeeRows.filter((row) => row.isModified)
+
+    if (modifiedRows.length === 0) {
+      toast.info('No custom amounts to apply — all students are using the base fee')
+      setFeesApplied(true)
+      return
+    }
+
+    if (classForm.selectedMonths.length === 0) {
+      toast.error('Select at least one month')
+      return
+    }
+
+    setApplyingFees(true)
+    try {
+      const selectedStructures = feeStructures.filter((f) =>
+        classForm.feeStructureIds.includes(f.id)
+      )
+      const activeYear = await getActiveAcademicYear()
+      const primaryMonth = classForm.selectedMonths[0]
+      const year = Number(classForm.year)
+
+      const overrides: {
+        studentId: number
+        description: string
+        amount: number
+        isYearLong: boolean
+        month?: number
+        year?: number
+        academicYearId?: number
+      }[] = []
+
+      for (const row of modifiedRows) {
+        if (row.baseAmount <= 0) {
+          throw new Error(`Base fee is zero for ${row.studentName}; cannot scale custom amount`)
+        }
+        const ratio = row.customAmount / row.baseAmount
+
+        for (const fs of selectedStructures) {
+          const scaledAmount = Math.round(Number(fs.amount) * ratio * 100) / 100
+          if (row.overrideType === 'year') {
+            if (!activeYear?.id) {
+              throw new Error('No active academic year found for year-long overrides')
+            }
+            overrides.push({
+              studentId: row.studentId,
+              description: fs.name,
+              amount: scaledAmount,
+              isYearLong: true,
+              academicYearId: activeYear.id,
+            })
+          } else {
+            // "This Month Only" applies to the first selected month when generating multiple months
+            overrides.push({
+              studentId: row.studentId,
+              description: fs.name,
+              amount: scaledAmount,
+              isYearLong: false,
+              month: primaryMonth,
+              year,
+            })
+          }
+        }
+      }
+
+      await saveStudentFeeOverrides(overrides)
+      toast.success(`Custom fees saved for ${modifiedRows.length} students`)
+      setFeesApplied(true)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save custom fees')
+    } finally {
+      setApplyingFees(false)
+    }
   }
 
   async function handleGenerateClass() {
     if (!classForm.classId) { toast.error('Select a class'); return }
     if (classForm.feeStructureIds.length === 0) { toast.error('Select at least one fee structure'); return }
     if (classForm.selectedMonths.length === 0) { toast.error('Select at least one month'); return }
+    if (!studentsLoaded) {
+      toast.error('Please load students first')
+      return
+    }
+    if (!feesApplied && studentFeeRows.some((r) => r.isModified)) {
+      toast.error('Please click "Apply Custom Fees" before generating vouchers')
+      return
+    }
+
     setGeneratingClass(true)
     try {
-      const months = classForm.selectedMonths.map((m) => ({
-        month: m,
-        year: Number(classForm.year),
-      }))
-      const studentFees = classStudents.map((s) => ({
-        studentId: s.id,
-        customAmount: studentFeeMap[s.id]?.customAmount ?? classPreviewTotal,
-        baseAmount: classPreviewTotal,
-        applyTo: studentFeeMap[s.id]?.applyTo ?? 'month' as const,
-      }))
       const result = await generateVouchersForClass({
         classId: Number(classForm.classId),
-        months,
+        months: classForm.selectedMonths,
+        year: Number(classForm.year),
         dueDate: new Date(classForm.dueDate),
         feeStructureIds: classForm.feeStructureIds,
-        studentFees,
       })
-      toast.success(`${result.created} vouchers created, ${result.skipped} already existed`)
+
+      const monthBreakdown = result.classResults
+        .map((r) => `${MONTHS.find((m) => m.value === r.month)?.label ?? r.month}: ${r.created} created`)
+        .join(', ')
+
+      toast.success(
+        `${result.created} vouchers created, ${result.skipped} already existed` +
+          (result.classResults.length > 1 ? ` (${monthBreakdown})` : '')
+      )
       setLastGeneratedClass({
         classId: Number(classForm.classId),
         month: classForm.selectedMonths[0],
         year: Number(classForm.year),
       })
       setClassDialogOpen(false)
+      resetClassDialogState()
       loadData()
-    } catch { toast.error('Failed to generate vouchers') }
-    finally { setGeneratingClass(false) }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to generate vouchers')
+    } finally {
+      setGeneratingClass(false)
+    }
   }
 
   async function handleGenerateStudent() {
@@ -452,7 +654,7 @@ export default function FeeVouchersPage() {
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button onClick={() => setClassDialogOpen(true)} className="gap-2">
+          <Button onClick={openClassDialog} className="gap-2">
             <Users className="h-4 w-4" />
             Generate for Class
           </Button>
@@ -696,27 +898,50 @@ export default function FeeVouchersPage() {
       </div>
 
       {/* Generate Class Dialog */}
-      <Dialog open={classDialogOpen} onOpenChange={setClassDialogOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+      <Dialog
+        open={classDialogOpen}
+        onOpenChange={(open) => {
+          setClassDialogOpen(open)
+          if (!open) resetClassDialogState()
+        }}
+      >
+        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Generate Vouchers for Class</DialogTitle>
-            <DialogDescription>Create fee vouchers for all active students in a class.</DialogDescription>
+            <DialogDescription>
+              Configure fees, load students, apply custom amounts, then generate vouchers.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
               <Label>Class *</Label>
-              <Select value={classForm.classId} onValueChange={(v) => setClassForm((f) => ({ ...f, classId: v ?? '', feeStructureIds: [] }))}>
+              <Select
+                value={classForm.classId}
+                onValueChange={(v) =>
+                  setClassForm((f) => ({ ...f, classId: v ?? '', feeStructureIds: [] }))
+                }
+              >
                 <SelectTrigger className="h-9 w-full"><SelectValue placeholder="Select class…" /></SelectTrigger>
                 <SelectContent>
-                  {classes.map((c) => <SelectItem key={c.id} value={String(c.id)}>{c.name} – {c.section}</SelectItem>)}
+                  {classes.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.name} – {c.section}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label>Months *</Label>
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" checked={allMonthsSelected} onChange={(e) => toggleAllMonths(e.target.checked)} className="rounded" />
+                  <input
+                    type="checkbox"
+                    checked={allMonthsSelected}
+                    onChange={(e) => toggleAllMonths(e.target.checked)}
+                    className="rounded"
+                  />
                   Select All Months
                 </label>
               </div>
@@ -734,31 +959,46 @@ export default function FeeVouchersPage() {
                 ))}
               </div>
             </div>
+
             <div className="space-y-1.5">
               <Label>Year *</Label>
-              <Input type="number" value={classForm.year} onChange={(e) => setClassForm((f) => ({ ...f, year: e.target.value }))} className="h-9 w-32" />
+              <Input
+                type="number"
+                value={classForm.year}
+                onChange={(e) => setClassForm((f) => ({ ...f, year: e.target.value }))}
+                className="h-9 w-32"
+              />
             </div>
+
             <div className="space-y-1.5">
               <Label>Due Date *</Label>
-              <Input type="date" value={classForm.dueDate} onChange={(e) => setClassForm((f) => ({ ...f, dueDate: e.target.value }))} className="h-9" />
+              <Input
+                type="date"
+                value={classForm.dueDate}
+                onChange={(e) => setClassForm((f) => ({ ...f, dueDate: e.target.value }))}
+                className="h-9"
+              />
             </div>
+
             <div className="space-y-2">
               <Label>Fee Structures *</Label>
               <div className="rounded-lg border p-3 space-y-2 max-h-48 overflow-y-auto">
                 {classFeeStructures.length === 0 ? (
                   <p className="text-sm text-muted-foreground">No fee structures found.</p>
-                ) : classFeeStructures.map((f) => (
-                  <label key={f.id} className="flex items-center gap-2 cursor-pointer text-sm">
-                    <input
-                      type="checkbox"
-                      checked={classForm.feeStructureIds.includes(f.id)}
-                      onChange={() => toggleFeeStructure(f.id)}
-                      className="rounded"
-                    />
-                    <span className="flex-1">{f.name}</span>
-                    <span className="text-muted-foreground">{formatRs(Number(f.amount))}</span>
-                  </label>
-                ))}
+                ) : (
+                  classFeeStructures.map((f) => (
+                    <label key={f.id} className="flex items-center gap-2 cursor-pointer text-sm">
+                      <input
+                        type="checkbox"
+                        checked={classForm.feeStructureIds.includes(f.id)}
+                        onChange={() => toggleFeeStructure(f.id)}
+                        className="rounded"
+                      />
+                      <span className="flex-1">{f.name}</span>
+                      <span className="text-muted-foreground">{formatRs(Number(f.amount))}</span>
+                    </label>
+                  ))
+                )}
               </div>
               {classForm.feeStructureIds.length > 0 && (
                 <p className="text-sm font-medium text-primary">
@@ -769,75 +1009,112 @@ export default function FeeVouchersPage() {
               )}
             </div>
 
-            {classForm.classId && classForm.feeStructureIds.length > 0 && classStudents.length > 0 && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleLoadStudents}
+              disabled={loadingStudents}
+              className="w-full"
+            >
+              {loadingStudents ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Loading students…
+                </>
+              ) : (
+                'Load Students'
+              )}
+            </Button>
+
+            {studentsLoaded && (
               <div className="space-y-3 border-t pt-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <Label className="text-base">Student Fee Details</Label>
+                <div>
+                  <Label className="text-base">Review and Adjust Student Fees</Label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Base fee is calculated from selected fee structures. Edit any student&apos;s amount
+                    and click &apos;Apply Custom Fees&apos; before generating.
+                  </p>
+                  {classForm.selectedMonths.length > 1 && (
+                    <p className="text-xs text-amber-700 mt-1">
+                      &quot;This Month Only&quot; applies to{' '}
+                      {MONTHS.find((m) => m.value === classForm.selectedMonths[0])?.label ?? 'the first selected month'}
+                      {' '}only. Other selected months use base fee (unless a year override is set).
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-end gap-2">
                   <Button type="button" variant="outline" size="sm" onClick={resetAllFeesToBase}>
+                    <RotateCcw className="h-3.5 w-3.5 mr-1" />
                     Reset All to Base Fee
                   </Button>
-                </div>
-                <div className="flex gap-2 items-end">
-                  <div className="flex-1">
-                    <Label className="text-xs">Apply Same Amount to All</Label>
-                    <Input
-                      type="number"
-                      placeholder="Amount"
-                      value={applyAllAmount}
-                      onChange={(e) => setApplyAllAmount(e.target.value)}
-                      className="h-8"
-                    />
+                  <div className="flex gap-2 items-end flex-1 min-w-[200px]">
+                    <div className="flex-1">
+                      <Label className="text-xs">Apply Same Amount to All</Label>
+                      <Input
+                        type="number"
+                        placeholder="Amount"
+                        value={applyAllAmount}
+                        onChange={(e) => setApplyAllAmount(e.target.value)}
+                        className="h-8"
+                      />
+                    </div>
+                    <Button type="button" variant="secondary" size="sm" onClick={applySameAmountToAll}>
+                      Apply
+                    </Button>
                   </div>
-                  <Button type="button" variant="secondary" size="sm" onClick={applySameAmountToAll}>Apply</Button>
                 </div>
-                <div className="rounded-lg border overflow-x-auto max-h-64 overflow-y-auto">
+
+                <div className="rounded-lg border overflow-x-auto max-h-72 overflow-y-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-muted/50 sticky top-0">
                       <tr>
-                        <th className="text-left p-2 font-medium">Student</th>
+                        <th className="text-left p-2 font-medium">#</th>
+                        <th className="text-left p-2 font-medium">Student Name</th>
                         <th className="text-left p-2 font-medium">Reg#</th>
                         <th className="text-right p-2 font-medium">Base Fee</th>
                         <th className="text-right p-2 font-medium">Custom Amount</th>
-                        <th className="text-left p-2 font-medium">Apply To</th>
+                        <th className="text-left p-2 font-medium">Override Type</th>
+                        <th className="text-left p-2 font-medium">Status</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {classStudents.map((s) => {
-                        const fee = studentFeeMap[s.id] ?? { customAmount: classPreviewTotal, applyTo: 'month' as const }
-                        const differs = fee.customAmount !== classPreviewTotal
+                      {studentFeeRows.map((row, idx) => {
+                        const differs = row.customAmount !== row.baseAmount
                         return (
-                          <tr key={s.id} className="border-t">
-                            <td className="p-2">{s.firstName} {s.lastName}</td>
-                            <td className="p-2 font-mono text-xs">{s.registrationNumber}</td>
-                            <td className="p-2 text-right text-muted-foreground">{formatRs(classPreviewTotal)}</td>
+                          <tr key={row.studentId} className="border-t">
+                            <td className="p-2 text-muted-foreground">{idx + 1}</td>
+                            <td className="p-2">{row.studentName}</td>
+                            <td className="p-2 font-mono text-xs">{row.regNumber}</td>
+                            <td className="p-2 text-right text-muted-foreground">
+                              {formatRs(row.baseAmount)}
+                            </td>
                             <td className="p-2">
                               <Input
                                 type="number"
                                 className="h-8 w-24 ml-auto text-right"
-                                value={fee.customAmount}
-                                onChange={(e) => {
-                                  const val = parseFloat(e.target.value) || 0
-                                  setStudentFeeMap((prev) => ({
-                                    ...prev,
-                                    [s.id]: { ...fee, customAmount: val },
-                                  }))
-                                }}
+                                value={row.customAmount}
+                                onChange={(e) =>
+                                  handleAmountChange(row.studentId, parseFloat(e.target.value) || 0)
+                                }
                               />
                             </td>
                             <td className="p-2">
                               {differs ? (
                                 <select
                                   className={cn(
-                                    'h-8 rounded border px-2 text-xs',
-                                    fee.applyTo === 'month' ? 'text-orange-700 border-orange-300 bg-orange-50' : 'text-blue-700 border-blue-300 bg-blue-50'
+                                    'h-8 rounded border px-2 text-xs w-full min-w-[130px]',
+                                    row.overrideType === 'month'
+                                      ? 'text-orange-700 border-orange-300 bg-orange-50'
+                                      : 'text-blue-700 border-blue-300 bg-blue-50'
                                   )}
-                                  value={fee.applyTo}
-                                  onChange={(e) => {
-                                    setStudentFeeMap((prev) => ({
-                                      ...prev,
-                                      [s.id]: { ...fee, applyTo: e.target.value as 'month' | 'year' },
-                                    }))
-                                  }}
+                                  value={row.overrideType}
+                                  onChange={(e) =>
+                                    handleOverrideTypeChange(
+                                      row.studentId,
+                                      e.target.value as 'month' | 'year'
+                                    )
+                                  }
                                 >
                                   <option value="month">This Month Only</option>
                                   <option value="year">Entire Year</option>
@@ -846,21 +1123,109 @@ export default function FeeVouchersPage() {
                                 <span className="text-xs text-muted-foreground">—</span>
                               )}
                             </td>
+                            <td className="p-2">
+                              {row.hasExistingYearOverride &&
+                              row.customAmount === row.initialAmount ? (
+                                <Badge className="bg-emerald-100 text-emerald-700 hover:bg-emerald-100">
+                                  Year Override Active
+                                </Badge>
+                              ) : row.hasExistingMonthOverride &&
+                                row.customAmount === row.initialAmount ? (
+                                <Badge className="bg-sky-100 text-sky-700 hover:bg-sky-100">
+                                  Month Override Active
+                                </Badge>
+                              ) : differs ? (
+                                <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100">
+                                  Custom
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-slate-100 text-slate-600 hover:bg-slate-100">
+                                  Default
+                                </Badge>
+                              )}
+                            </td>
                           </tr>
                         )
                       })}
                     </tbody>
                   </table>
                 </div>
+
+                <div className="space-y-2 pt-2">
+                  {(() => {
+                    const hasCustomPending = studentFeeRows.some((r) => r.isModified)
+                    const mustApplyFirst = hasCustomPending && !feesApplied
+                    return (
+                      <>
+                        <Button
+                          type="button"
+                          className={cn(
+                            'w-full',
+                            feesApplied && hasCustomPending
+                              ? 'bg-emerald-600 hover:bg-emerald-700'
+                              : 'bg-orange-500 hover:bg-orange-600'
+                          )}
+                          disabled={applyingFees || !hasCustomPending}
+                          onClick={handleApplyCustomFees}
+                        >
+                          {applyingFees ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Saving fee overrides…
+                            </>
+                          ) : feesApplied && hasCustomPending ? (
+                            'Custom Fees Applied ✓'
+                          ) : (
+                            'Apply Custom Fees'
+                          )}
+                        </Button>
+                        {feesApplied && hasCustomPending && (
+                          <p className="text-sm text-emerald-700 text-center font-medium">
+                            Custom fees saved ✓
+                          </p>
+                        )}
+
+                        <div>
+                          <Button
+                            type="button"
+                            className="w-full bg-emerald-600 hover:bg-emerald-700"
+                            disabled={generatingClass || mustApplyFirst}
+                            title={
+                              mustApplyFirst
+                                ? 'Apply custom fees first before generating'
+                                : undefined
+                            }
+                            onClick={handleGenerateClass}
+                          >
+                            {generatingClass ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Generating…
+                              </>
+                            ) : (
+                              'Generate Vouchers'
+                            )}
+                          </Button>
+                          {mustApplyFirst && (
+                            <p className="text-xs text-amber-700 text-center mt-1">
+                              Apply custom fees first before generating
+                            </p>
+                          )}
+                        </div>
+                      </>
+                    )
+                  })()}
+                </div>
               </div>
             )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setClassDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleGenerateClass} disabled={generatingClass}>
-              {generatingClass ? 'Generating…' : 'Generate Vouchers'}
-            </Button>
-          </DialogFooter>
+          {!studentsLoaded && (
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setClassDialogOpen(false)}>
+                Cancel
+              </Button>
+            </DialogFooter>
+          )}
         </DialogContent>
       </Dialog>
 

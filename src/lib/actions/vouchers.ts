@@ -519,14 +519,16 @@ async function createVoucherWithAdvance(opts: {
 
 export async function getStudentFeeAmount(
   studentId: number,
-  feeDescription: string,
+  description: string,
   month: number,
-  year: number
-): Promise<number | null> {
+  year: number,
+  defaultAmount: number
+): Promise<number> {
+  // Priority 1: month-specific override
   const monthOverride = await prisma.studentFeeOverride.findFirst({
     where: {
       studentId,
-      description: feeDescription,
+      description: { equals: description, mode: 'insensitive' },
       isYearLong: false,
       month,
       year,
@@ -534,17 +536,26 @@ export async function getStudentFeeAmount(
   })
   if (monthOverride) return Number(monthOverride.amount)
 
-  const yearOverride = await prisma.studentFeeOverride.findFirst({
-    where: {
-      studentId,
-      description: feeDescription,
-      isYearLong: true,
-      academicYear: { isActive: true },
-    },
+  // Priority 2: year-long override for the active academic year
+  const activeYear = await prisma.academicYear.findFirst({
+    where: { isActive: true },
+    select: { id: true },
   })
-  if (yearOverride) return Number(yearOverride.amount)
 
-  return null
+  if (activeYear) {
+    const yearOverride = await prisma.studentFeeOverride.findFirst({
+      where: {
+        studentId,
+        description: { equals: description, mode: 'insensitive' },
+        isYearLong: true,
+        academicYearId: activeYear.id,
+      },
+    })
+    if (yearOverride) return Number(yearOverride.amount)
+  }
+
+  // Priority 3: default fee structure amount
+  return defaultAmount
 }
 
 async function buildFeeItemsWithOverrides(
@@ -555,73 +566,197 @@ async function buildFeeItemsWithOverrides(
 ) {
   const items: { description: string; amount: number }[] = []
   for (const fs of feeStructures) {
-    const override = await getStudentFeeAmount(studentId, fs.name, month, year)
-    items.push({
-      description: fs.name,
-      amount: override ?? Number(fs.amount),
-    })
+    const amount = await getStudentFeeAmount(
+      studentId,
+      fs.name,
+      month,
+      year,
+      Number(fs.amount)
+    )
+    items.push({ description: fs.name, amount })
   }
   return items
 }
 
-async function saveStudentFeeOverrides(opts: {
-  studentId: number
-  feeStructures: { name: string; amount: number }[]
-  customAmount: number
-  baseAmount: number
-  applyTo: 'month' | 'year'
-  months: { month: number; year: number }[]
-}) {
-  if (opts.customAmount === opts.baseAmount || opts.baseAmount <= 0) return
+export async function saveStudentFeeOverrides(
+  overrides: {
+    studentId: number
+    description: string
+    amount: number
+    isYearLong: boolean
+    month?: number
+    year?: number
+    academicYearId?: number
+  }[]
+): Promise<{ saved: number }> {
+  let saved = 0
 
-  const ratio = opts.customAmount / opts.baseAmount
-  const activeYear = await prisma.academicYear.findFirst({ where: { isActive: true } })
+  for (const override of overrides) {
+    if (override.isYearLong) {
+      if (!override.academicYearId) {
+        throw new Error('Academic year is required for year-long fee overrides')
+      }
 
-  for (const fs of opts.feeStructures) {
-    const scaledAmount = Math.round(fs.amount * ratio * 100) / 100
-    if (opts.applyTo === 'year') {
-      if (!activeYear) continue
-      await prisma.studentFeeOverride.deleteMany({
+      const existing = await prisma.studentFeeOverride.findFirst({
         where: {
-          studentId: opts.studentId,
-          description: fs.name,
+          studentId: override.studentId,
+          description: override.description,
           isYearLong: true,
-          academicYearId: activeYear.id,
+          academicYearId: override.academicYearId,
         },
+        select: { id: true },
       })
-      await prisma.studentFeeOverride.create({
-        data: {
-          studentId: opts.studentId,
-          description: fs.name,
-          amount: scaledAmount,
-          isYearLong: true,
-          academicYearId: activeYear.id,
-        },
-      })
-    } else {
-      for (const { month, year } of opts.months) {
-        await prisma.studentFeeOverride.deleteMany({
-          where: {
-            studentId: opts.studentId,
-            description: fs.name,
-            isYearLong: false,
-            month,
-            year,
-          },
+
+      if (existing) {
+        await prisma.studentFeeOverride.update({
+          where: { id: existing.id },
+          data: { amount: override.amount },
         })
+      } else {
         await prisma.studentFeeOverride.create({
           data: {
-            studentId: opts.studentId,
-            description: fs.name,
-            amount: scaledAmount,
+            studentId: override.studentId,
+            description: override.description,
+            amount: override.amount,
+            isYearLong: true,
+            academicYearId: override.academicYearId,
+          },
+        })
+      }
+    } else {
+      if (override.month == null || override.year == null) {
+        throw new Error('Month and year are required for month-specific fee overrides')
+      }
+
+      const existing = await prisma.studentFeeOverride.findFirst({
+        where: {
+          studentId: override.studentId,
+          description: override.description,
+          isYearLong: false,
+          month: override.month,
+          year: override.year,
+        },
+        select: { id: true },
+      })
+
+      if (existing) {
+        await prisma.studentFeeOverride.update({
+          where: { id: existing.id },
+          data: { amount: override.amount },
+        })
+      } else {
+        await prisma.studentFeeOverride.create({
+          data: {
+            studentId: override.studentId,
+            description: override.description,
+            amount: override.amount,
             isYearLong: false,
-            month,
-            year,
+            month: override.month,
+            year: override.year,
           },
         })
       }
     }
+    saved++
   }
+
+  revalidatePath('/fees/vouchers')
+  return { saved }
+}
+
+export async function getStudentsWithFeeOverrides(
+  classId: number,
+  month: number,
+  year: number,
+  feeStructureIds: number[]
+): Promise<{
+  studentId: number
+  firstName: string
+  lastName: string
+  registrationNumber: string
+  baseAmount: number
+  effectiveAmount: number
+  hasYearOverride: boolean
+  hasMonthOverride: boolean
+}[]> {
+  const [students, feeStructures, activeYear] = await Promise.all([
+    prisma.student.findMany({
+      where: { classId, status: 'ACTIVE' },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        registrationNumber: true,
+      },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+    }),
+    prisma.feeStructure.findMany({
+      where: { id: { in: feeStructureIds } },
+      select: { id: true, name: true, amount: true },
+    }),
+    prisma.academicYear.findFirst({
+      where: { isActive: true },
+      select: { id: true },
+    }),
+  ])
+
+  const baseAmount = feeStructures.reduce((sum, fs) => sum + Number(fs.amount), 0)
+
+  return Promise.all(
+    students.map(async (student) => {
+      let effectiveAmount = 0
+      let hasYearOverride = false
+      let hasMonthOverride = false
+
+      for (const fs of feeStructures) {
+        const defaultAmt = Number(fs.amount)
+        const monthOverride = await prisma.studentFeeOverride.findFirst({
+          where: {
+            studentId: student.id,
+            description: { equals: fs.name, mode: 'insensitive' },
+            isYearLong: false,
+            month,
+            year,
+          },
+        })
+
+        if (monthOverride) {
+          effectiveAmount += Number(monthOverride.amount)
+          hasMonthOverride = true
+          continue
+        }
+
+        if (activeYear) {
+          const yearOverride = await prisma.studentFeeOverride.findFirst({
+            where: {
+              studentId: student.id,
+              description: { equals: fs.name, mode: 'insensitive' },
+              isYearLong: true,
+              academicYearId: activeYear.id,
+            },
+          })
+          if (yearOverride) {
+            effectiveAmount += Number(yearOverride.amount)
+            hasYearOverride = true
+            continue
+          }
+        }
+
+        effectiveAmount += defaultAmt
+      }
+
+      return {
+        studentId: student.id,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        registrationNumber: student.registrationNumber,
+        baseAmount,
+        effectiveAmount,
+        hasYearOverride,
+        hasMonthOverride,
+      }
+    })
+  )
 }
 
 export async function getStudentFeeOverrides(studentId: number) {
@@ -644,88 +779,101 @@ export async function deleteStudentFeeOverride(id: number) {
 
 export async function generateVouchersForClass(data: {
   classId: number
-  months: { month: number; year: number }[]
+  months: number[]
+  year: number
   dueDate: Date
   feeStructureIds: number[]
-  studentFees?: {
-    studentId: number
-    customAmount: number
-    baseAmount: number
-    applyTo: 'month' | 'year'
-  }[]
-}) {
-  const [students, feeStructures] = await Promise.all([
-    prisma.student.findMany({
-      where: { classId: data.classId, status: 'ACTIVE' },
-      select: { id: true },
-    }),
-    prisma.feeStructure.findMany({
-      where: { id: { in: data.feeStructureIds } },
-      select: { id: true, name: true, amount: true },
-    }),
-  ])
+}): Promise<{
+  created: number
+  skipped: number
+  advanceAppliedCount: number
+  classResults: { month: number; created: number; skipped: number }[]
+}> {
+  const feeStructures = await prisma.feeStructure.findMany({
+    where: { id: { in: data.feeStructureIds } },
+    select: { id: true, name: true, amount: true },
+  })
 
-  const feeItemsBase = feeStructures.map((f) => ({
-    name: f.name,
-    amount: Number(f.amount),
-  }))
-  const baseTotal = feeItemsBase.reduce((s, f) => s + f.amount, 0)
-  const feeMap = new Map(
-    (data.studentFees ?? []).map((sf) => [sf.studentId, sf])
-  )
+  if (feeStructures.length === 0) {
+    throw new Error('No fee structures found')
+  }
 
-  let created = 0
-  let skipped = 0
+  const students = await prisma.student.findMany({
+    where: { classId: data.classId, status: 'ACTIVE' },
+    select: { id: true },
+  })
+
+  if (students.length === 0) {
+    throw new Error('No active students found in this class')
+  }
+
+  const months = [...new Set(data.months)].sort((a, b) => a - b)
+  const dueDay = new Date(data.dueDate).getDate()
+
+  let totalCreated = 0
+  let totalSkipped = 0
   let advanceAppliedCount = 0
+  const classResults: { month: number; created: number; skipped: number }[] = []
 
-  for (const student of students) {
-    const custom = feeMap.get(student.id)
-    if (custom && custom.customAmount !== custom.baseAmount) {
-      await saveStudentFeeOverrides({
-        studentId: student.id,
-        feeStructures: feeItemsBase,
-        customAmount: custom.customAmount,
-        baseAmount: custom.baseAmount || baseTotal,
-        applyTo: custom.applyTo,
-        months: data.months,
-      })
-    }
+  for (const month of months) {
+    let monthCreated = 0
+    let monthSkipped = 0
 
-    for (const { month, year } of data.months) {
+    for (const student of students) {
       try {
         const existing = await prisma.feeVoucher.findUnique({
-          where: { studentId_month_year: { studentId: student.id, month, year } },
+          where: {
+            studentId_month_year: {
+              studentId: student.id,
+              month,
+              year: data.year,
+            },
+          },
         })
-        if (existing) { skipped++; continue }
 
-        let feeItems = await buildFeeItemsWithOverrides(student.id, feeStructures, month, year)
-
-        if (custom && custom.customAmount !== custom.baseAmount && custom.applyTo === 'month') {
-          const ratio = custom.customAmount / (custom.baseAmount || baseTotal)
-          feeItems = feeItems.map((item) => ({
-            ...item,
-            amount: Math.round(item.amount * ratio * 100) / 100,
-          }))
+        if (existing) {
+          monthSkipped++
+          continue
         }
 
+        const feeItems = await buildFeeItemsWithOverrides(
+          student.id,
+          feeStructures,
+          month,
+          data.year
+        )
+
+        const voucherDueDate = new Date(data.year, month - 1, dueDay)
         const voucher = await createVoucherWithAdvance({
           studentId: student.id,
           month,
-          year,
-          dueDate: data.dueDate,
+          year: data.year,
+          dueDate: voucherDueDate,
           feeItems,
         })
+
         if (Number(voucher.appliedAdvance) > 0) advanceAppliedCount++
-        created++
-      } catch {
-        skipped++
+        monthCreated++
+      } catch (e) {
+        console.error(`Failed to create voucher for student ${student.id}:`, e)
+        monthSkipped++
       }
     }
+
+    totalCreated += monthCreated
+    totalSkipped += monthSkipped
+    classResults.push({ month, created: monthCreated, skipped: monthSkipped })
   }
 
   revalidatePath('/fees/vouchers')
   revalidatePath('/fees/outstanding')
-  return { created, skipped, advanceAppliedCount }
+
+  return {
+    created: totalCreated,
+    skipped: totalSkipped,
+    advanceAppliedCount,
+    classResults,
+  }
 }
 
 export async function generateVoucherForStudent(data: {
