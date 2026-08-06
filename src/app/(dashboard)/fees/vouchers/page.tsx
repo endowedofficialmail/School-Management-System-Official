@@ -701,24 +701,30 @@ export default function FeeVouchersPage() {
 
     setGeneratingStudent(true)
     try {
-      const voucher = await generateVoucherForStudent({
+      const result = await generateVoucherForStudent({
         studentId: Number(studentForm.studentId),
         month: Number(studentForm.month),
         year: Number(studentForm.year),
-        dueDate: new Date(studentForm.dueDate),
+        dueDate: studentForm.dueDate,
         feeStructureIds: studentForm.feeStructureIds,
         customItems: studentCustomItems,
       })
+
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+
       setStudentGenResult({
-        id: voucher.id,
-        voucherNumber: voucher.voucherNumber,
-        totalAmount: voucher.totalAmount,
-        month: voucher.month,
-        year: voucher.year,
+        id: result.id,
+        voucherNumber: result.voucherNumber,
+        totalAmount: result.totalAmount,
+        month: result.month,
+        year: result.year,
         studentName: studentForm.studentName || 'Student',
       })
-      toast.success(`Voucher ${voucher.voucherNumber} generated successfully`)
-      loadData()
+      toast.success(`Voucher ${result.voucherNumber} generated successfully`)
+      void loadData()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to generate voucher')
     } finally {

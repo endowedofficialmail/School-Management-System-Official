@@ -964,97 +964,140 @@ export async function generateVoucherForStudent(data: {
   studentId: number
   month: number
   year: number
-  dueDate: Date
+  dueDate: Date | string
   feeStructureIds: number[]
   customItems?: { description: string; amount: number }[]
   notes?: string
-}) {
-  const existing = await prisma.feeVoucher.findUnique({
-    where: {
-      studentId_month_year: {
-        studentId: data.studentId,
-        month: data.month,
-        year: data.year,
+}): Promise<
+  | {
+      success: true
+      id: number
+      voucherNumber: string
+      totalAmount: number
+      month: number
+      year: number
+      status: string
+    }
+  | { success: false; error: string }
+> {
+  try {
+    const dueDate =
+      data.dueDate instanceof Date ? data.dueDate : new Date(data.dueDate)
+    if (Number.isNaN(dueDate.getTime())) {
+      return { success: false, error: 'Invalid due date' }
+    }
+
+    const existing = await prisma.feeVoucher.findUnique({
+      where: {
+        studentId_month_year: {
+          studentId: data.studentId,
+          month: data.month,
+          year: data.year,
+        },
       },
-    },
-  })
-  if (existing) {
-    throw new Error('A voucher already exists for this student for the selected month/year')
-  }
-
-  const feeStructures =
-    data.feeStructureIds.length > 0
-      ? await prisma.feeStructure.findMany({
-          where: { id: { in: data.feeStructureIds } },
-          select: { id: true, name: true, amount: true },
-        })
-      : []
-
-  const customItems = (data.customItems ?? []).filter(
-    (item) => item.description.trim().length > 0 && item.amount > 0
-  )
-
-  if (feeStructures.length === 0 && customItems.length === 0) {
-    throw new Error('Please select at least one fee structure or add a custom item')
-  }
-
-  const structureItems = await Promise.all(
-    feeStructures.map(async (fs) => {
-      const actualAmount = await getStudentFeeAmount(
-        data.studentId,
-        fs.name,
-        data.month,
-        data.year,
-        Number(fs.amount)
-      )
+    })
+    if (existing) {
       return {
-        description: fs.name,
-        amount: actualAmount,
+        success: false,
+        error: 'A voucher already exists for this student for the selected month/year',
       }
+    }
+
+    const feeStructures =
+      data.feeStructureIds.length > 0
+        ? await prisma.feeStructure.findMany({
+            where: { id: { in: data.feeStructureIds } },
+            select: { id: true, name: true, amount: true },
+          })
+        : []
+
+    const customItems = (data.customItems ?? []).filter(
+      (item) => item.description.trim().length > 0 && item.amount > 0
+    )
+
+    if (feeStructures.length === 0 && customItems.length === 0) {
+      return {
+        success: false,
+        error: 'Please select at least one fee structure or add a custom item',
+      }
+    }
+
+    const structureItems = await Promise.all(
+      feeStructures.map(async (fs) => {
+        const actualAmount = await getStudentFeeAmount(
+          data.studentId,
+          fs.name,
+          data.month,
+          data.year,
+          Number(fs.amount)
+        )
+        return {
+          description: fs.name,
+          amount: actualAmount,
+        }
+      })
+    )
+
+    const customItemsWithOverrides = await Promise.all(
+      customItems.map(async (item) => ({
+        description: item.description,
+        amount: await getStudentFeeAmount(
+          data.studentId,
+          item.description,
+          data.month,
+          data.year,
+          item.amount
+        ),
+      }))
+    )
+
+    const feeItems = [...structureItems, ...customItemsWithOverrides]
+    const totalPreview = feeItems.reduce((sum, item) => sum + item.amount, 0)
+    if (totalPreview <= 0) {
+      return { success: false, error: 'Voucher total must be greater than zero' }
+    }
+
+    const voucher = await createVoucherWithAdvance({
+      studentId: data.studentId,
+      month: data.month,
+      year: data.year,
+      dueDate,
+      feeItems,
     })
-  )
 
-  const customItemsWithOverrides = await Promise.all(
-    customItems.map(async (item) => ({
-      description: item.description,
-      amount: await getStudentFeeAmount(
-        data.studentId,
-        item.description,
-        data.month,
-        data.year,
-        item.amount
-      ),
-    }))
-  )
+    if (data.notes?.trim()) {
+      await prisma.feeVoucher.update({
+        where: { id: voucher.id },
+        data: { notes: data.notes.trim() },
+      })
+    }
 
-  const feeItems = [...structureItems, ...customItemsWithOverrides]
+    try {
+      revalidatePath('/fees/vouchers')
+      revalidatePath('/fees/outstanding')
+    } catch {
+      // Revalidation must not fail voucher creation for the client
+    }
 
-  const voucher = await createVoucherWithAdvance({
-    studentId: data.studentId,
-    month: data.month,
-    year: data.year,
-    dueDate: data.dueDate,
-    feeItems,
-  })
-
-  if (data.notes?.trim()) {
-    await prisma.feeVoucher.update({
-      where: { id: voucher.id },
-      data: { notes: data.notes.trim() },
-    })
-  }
-
-  revalidatePath('/fees/vouchers')
-  revalidatePath('/fees/outstanding')
-  revalidatePath(`/students/${data.studentId}`)
-
-  return {
-    id: voucher.id,
-    voucherNumber: voucher.voucherNumber,
-    totalAmount: Number(voucher.totalAmount),
-    month: voucher.month,
-    year: voucher.year,
-    status: voucher.status,
+    return {
+      success: true,
+      id: voucher.id,
+      voucherNumber: voucher.voucherNumber,
+      totalAmount: Number(voucher.totalAmount),
+      month: voucher.month,
+      year: voucher.year,
+      status: voucher.status,
+    }
+  } catch (e) {
+    console.error('generateVoucherForStudent failed:', e)
+    const message = e instanceof Error ? e.message : 'Failed to generate voucher'
+    if (message.includes('Unique constraint')) {
+      return {
+        success: false,
+        error: 'A voucher already exists for this student for the selected month/year',
+      }
+    }
+    return { success: false, error: message }
   }
 }
 
