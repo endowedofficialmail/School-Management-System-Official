@@ -881,23 +881,87 @@ export async function generateVoucherForStudent(data: {
   month: number
   year: number
   dueDate: Date
-  items: { description: string; amount: number }[]
+  feeStructureIds: number[]
+  customItems?: { description: string; amount: number }[]
+  notes?: string
 }) {
   const existing = await prisma.feeVoucher.findUnique({
-    where: { studentId_month_year: { studentId: data.studentId, month: data.month, year: data.year } },
+    where: {
+      studentId_month_year: {
+        studentId: data.studentId,
+        month: data.month,
+        year: data.year,
+      },
+    },
   })
-  if (existing) throw new Error('A voucher already exists for this student for the selected month/year')
+  if (existing) {
+    throw new Error('A voucher already exists for this student for the selected month/year')
+  }
 
-  await createVoucherWithAdvance({
+  const feeStructures =
+    data.feeStructureIds.length > 0
+      ? await prisma.feeStructure.findMany({
+          where: { id: { in: data.feeStructureIds } },
+          select: { id: true, name: true, amount: true },
+        })
+      : []
+
+  const structureItems = feeStructures.map((fs) => ({
+    description: fs.name,
+    amount: Number(fs.amount),
+  }))
+
+  const customItems = (data.customItems ?? []).filter(
+    (item) => item.description.trim().length > 0 && item.amount > 0
+  )
+
+  const allItems = [...structureItems, ...customItems]
+
+  if (allItems.length === 0) {
+    throw new Error('Please select at least one fee structure or add a custom item')
+  }
+
+  // Apply student fee overrides for matching descriptions (fee structures + custom)
+  const feeItems = await Promise.all(
+    allItems.map(async (item) => ({
+      description: item.description,
+      amount: await getStudentFeeAmount(
+        data.studentId,
+        item.description,
+        data.month,
+        data.year,
+        item.amount
+      ),
+    }))
+  )
+
+  const voucher = await createVoucherWithAdvance({
     studentId: data.studentId,
     month: data.month,
     year: data.year,
     dueDate: data.dueDate,
-    feeItems: data.items,
+    feeItems,
   })
 
+  if (data.notes?.trim()) {
+    await prisma.feeVoucher.update({
+      where: { id: voucher.id },
+      data: { notes: data.notes.trim() },
+    })
+  }
+
   revalidatePath('/fees/vouchers')
+  revalidatePath('/fees/outstanding')
   revalidatePath(`/students/${data.studentId}`)
+
+  return {
+    id: voucher.id,
+    voucherNumber: voucher.voucherNumber,
+    totalAmount: Number(voucher.totalAmount),
+    month: voucher.month,
+    year: voucher.year,
+    status: voucher.status,
+  }
 }
 
 export async function generateVouchersForSchool(data: {

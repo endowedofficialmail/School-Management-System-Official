@@ -139,13 +139,26 @@ export default function FeeVouchersPage() {
   const [generatingClass, setGeneratingClass] = useState(false)
 
   const [studentForm, setStudentForm] = useState({
-    studentId: '', month: String(CURRENT_MONTH), year: String(CURRENT_YEAR),
+    studentId: '',
+    studentName: '',
+    classId: null as number | null,
+    month: String(CURRENT_MONTH),
+    year: String(CURRENT_YEAR),
     dueDate: format(new Date(CURRENT_YEAR, CURRENT_MONTH - 1, 10), 'yyyy-MM-dd'),
+    feeStructureIds: [] as number[],
     items: [{ description: '', amount: '' }],
   })
   const [studentSearch, setStudentSearch] = useState('')
   const [studentOptions, setStudentOptions] = useState<StudentItem[]>([])
   const [generatingStudent, setGeneratingStudent] = useState(false)
+  const [studentGenResult, setStudentGenResult] = useState<{
+    id: number
+    voucherNumber: string
+    totalAmount: number
+    month: number
+    year: number
+    studentName: string
+  } | null>(null)
 
   const [schoolForm, setSchoolForm] = useState({
     month: String(CURRENT_MONTH),
@@ -246,9 +259,42 @@ export default function FeeVouchersPage() {
     return feeStructures.filter((f) => !f.classId || f.classId === Number(classForm.classId))
   }, [feeStructures, classForm.classId])
 
-  const studentItemsTotal = useMemo(() => {
-    return studentForm.items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0)
-  }, [studentForm.items])
+  const studentFeeStructures = useMemo(() => {
+    if (!studentForm.classId) return feeStructures
+    return feeStructures.filter((f) => !f.classId || f.classId === studentForm.classId)
+  }, [feeStructures, studentForm.classId])
+
+  const studentSelectedStructures = useMemo(
+    () => studentFeeStructures.filter((f) => studentForm.feeStructureIds.includes(f.id)),
+    [studentFeeStructures, studentForm.feeStructureIds]
+  )
+
+  const studentCustomItems = useMemo(
+    () =>
+      studentForm.items
+        .map((i) => ({
+          description: i.description.trim(),
+          amount: parseFloat(i.amount) || 0,
+        }))
+        .filter((i) => i.description && i.amount > 0),
+    [studentForm.items]
+  )
+
+  const studentFeeStructureTotal = useMemo(
+    () => studentSelectedStructures.reduce((s, f) => s + Number(f.amount), 0),
+    [studentSelectedStructures]
+  )
+
+  const studentCustomItemsTotal = useMemo(
+    () => studentCustomItems.reduce((s, i) => s + i.amount, 0),
+    [studentCustomItems]
+  )
+
+  const studentGrandTotal = studentFeeStructureTotal + studentCustomItemsTotal
+
+  const allStudentFeesSelected =
+    studentFeeStructures.length > 0 &&
+    studentForm.feeStructureIds.length === studentFeeStructures.length
 
   const schoolAllClassFees = useMemo(
     () => feeStructures.filter((f) => f.classId == null),
@@ -552,27 +598,91 @@ export default function FeeVouchersPage() {
     }
   }
 
+  function resetStudentDialogState() {
+    setStudentForm({
+      studentId: '',
+      studentName: '',
+      classId: null,
+      month: String(CURRENT_MONTH),
+      year: String(CURRENT_YEAR),
+      dueDate: format(new Date(CURRENT_YEAR, CURRENT_MONTH - 1, 10), 'yyyy-MM-dd'),
+      feeStructureIds: [],
+      items: [{ description: '', amount: '' }],
+    })
+    setStudentSearch('')
+    setStudentOptions([])
+    setStudentGenResult(null)
+    setGeneratingStudent(false)
+  }
+
+  function openStudentDialog() {
+    resetStudentDialogState()
+    setStudentDialogOpen(true)
+  }
+
+  function toggleStudentFeeStructure(id: number) {
+    setStudentForm((f) => ({
+      ...f,
+      feeStructureIds: f.feeStructureIds.includes(id)
+        ? f.feeStructureIds.filter((x) => x !== id)
+        : [...f.feeStructureIds, id],
+    }))
+  }
+
+  function toggleSelectAllStudentFees(checked: boolean) {
+    setStudentForm((f) => ({
+      ...f,
+      feeStructureIds: checked ? studentFeeStructures.map((fs) => fs.id) : [],
+    }))
+  }
+
+  function syncStudentDueDate(month: string, year: string) {
+    const m = Number(month)
+    const y = Number(year)
+    if (!Number.isFinite(m) || !Number.isFinite(y)) return
+    setStudentForm((f) => ({
+      ...f,
+      month,
+      year,
+      dueDate: format(new Date(y, m - 1, 10), 'yyyy-MM-dd'),
+    }))
+  }
+
   async function handleGenerateStudent() {
-    if (!studentForm.studentId) { toast.error('Select a student'); return }
-    const items = studentForm.items
-      .filter((i) => i.description && i.amount)
-      .map((i) => ({ description: i.description, amount: parseFloat(i.amount) }))
-    if (items.length === 0) { toast.error('Add at least one fee item'); return }
+    if (!studentForm.studentId) {
+      toast.error('Please select a student')
+      return
+    }
+    if (studentForm.feeStructureIds.length === 0 && studentCustomItems.length === 0) {
+      toast.error('Please select at least one fee structure or add a custom item')
+      return
+    }
+
     setGeneratingStudent(true)
     try {
-      await generateVoucherForStudent({
+      const voucher = await generateVoucherForStudent({
         studentId: Number(studentForm.studentId),
         month: Number(studentForm.month),
         year: Number(studentForm.year),
         dueDate: new Date(studentForm.dueDate),
-        items,
+        feeStructureIds: studentForm.feeStructureIds,
+        customItems: studentCustomItems,
       })
-      toast.success('Voucher generated')
-      setStudentDialogOpen(false)
+      setStudentGenResult({
+        id: voucher.id,
+        voucherNumber: voucher.voucherNumber,
+        totalAmount: voucher.totalAmount,
+        month: voucher.month,
+        year: voucher.year,
+        studentName: studentForm.studentName || 'Student',
+      })
+      toast.success(`Voucher ${voucher.voucherNumber} generated successfully`)
       loadData()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to generate voucher')
-    } finally { setGeneratingStudent(false) }
+    } finally {
+      setGeneratingStudent(false)
+    }
   }
 
   async function handleGenerateSchool() {
@@ -658,7 +768,7 @@ export default function FeeVouchersPage() {
             <Users className="h-4 w-4" />
             Generate for Class
           </Button>
-          <Button variant="outline" onClick={() => setStudentDialogOpen(true)} className="gap-2">
+          <Button variant="outline" onClick={openStudentDialog} className="gap-2">
             <Plus className="h-4 w-4" />
             Generate for Student
           </Button>
@@ -1230,85 +1340,273 @@ export default function FeeVouchersPage() {
       </Dialog>
 
       {/* Generate Student Dialog */}
-      <Dialog open={studentDialogOpen} onOpenChange={setStudentDialogOpen}>
-        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
+      <Dialog
+        open={studentDialogOpen}
+        onOpenChange={(open) => {
+          setStudentDialogOpen(open)
+          if (!open) resetStudentDialogState()
+        }}
+      >
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Generate Voucher for Student</DialogTitle>
+            <DialogDescription>
+              Select fee structures and optional custom items for one student.
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label>Search Student *</Label>
-              <Input placeholder="Type student name or reg#…" value={studentSearch} onChange={(e) => setStudentSearch(e.target.value)} className="h-9" />
-              {studentOptions.length > 0 && (
-                <div className="rounded-lg border max-h-36 overflow-y-auto">
-                  {studentOptions.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      className={cn(
-                        'w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors',
-                        studentForm.studentId === String(s.id) && 'bg-primary/10 font-medium'
-                      )}
-                      onClick={() => { setStudentForm((f) => ({ ...f, studentId: String(s.id) })); setStudentSearch(`${s.firstName} ${s.lastName}`) }}
-                    >
-                      {s.firstName} {s.lastName} <span className="text-muted-foreground text-xs">({s.registrationNumber})</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Month</Label>
-                <Select value={studentForm.month} onValueChange={(v) => setStudentForm((f) => ({ ...f, month: v ?? '' }))}>
-                  <SelectTrigger className="h-9 w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {MONTHS.map((m) => <SelectItem key={m.value} value={String(m.value)}>{m.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+
+          {studentGenResult ? (
+            <div className="space-y-4 py-2">
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-2">
+                <p className="font-semibold text-emerald-800">✓ Voucher Generated Successfully!</p>
+                <p className="text-sm"><span className="text-muted-foreground">Voucher #:</span> <span className="font-mono font-medium">{studentGenResult.voucherNumber}</span></p>
+                <p className="text-sm"><span className="text-muted-foreground">Student:</span> {studentGenResult.studentName}</p>
+                <p className="text-sm"><span className="text-muted-foreground">Amount:</span> {formatRs(studentGenResult.totalAmount)}</p>
+                <p className="text-sm">
+                  <span className="text-muted-foreground">Month:</span>{' '}
+                  {MONTHS.find((m) => m.value === studentGenResult.month)?.label ?? studentGenResult.month}{' '}
+                  {studentGenResult.year}
+                </p>
               </div>
-              <div className="space-y-1.5">
-                <Label>Year</Label>
-                <Input type="number" value={studentForm.year} onChange={(e) => setStudentForm((f) => ({ ...f, year: e.target.value }))} className="h-9" />
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => window.open(`/print/voucher/${studentGenResult.id}?style=simple`, '_blank')}
+                >
+                  Print Simple Copy
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => window.open(`/print/voucher/${studentGenResult.id}?style=bank`, '_blank')}
+                >
+                  Print Bank Challan
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setStudentDialogOpen(false)
+                    resetStudentDialogState()
+                  }}
+                >
+                  Done
+                </Button>
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label>Due Date</Label>
-              <Input type="date" value={studentForm.dueDate} onChange={(e) => setStudentForm((f) => ({ ...f, dueDate: e.target.value }))} className="h-9" />
-            </div>
-            <div className="space-y-2">
-              <Label>Fee Items</Label>
-              {studentForm.items.map((item, idx) => (
-                <div key={idx} className="flex gap-2">
-                  <Input placeholder="Description" value={item.description} onChange={(e) => {
-                    const items = [...studentForm.items]
-                    items[idx] = { ...items[idx], description: e.target.value }
-                    setStudentForm((f) => ({ ...f, items }))
-                  }} className="h-9 flex-1" />
-                  <Input type="number" placeholder="Amount" value={item.amount} onChange={(e) => {
-                    const items = [...studentForm.items]
-                    items[idx] = { ...items[idx], amount: e.target.value }
-                    setStudentForm((f) => ({ ...f, items }))
-                  }} className="h-9 w-28" />
-                  {studentForm.items.length > 1 && (
-                    <Button variant="ghost" size="sm" className="h-9 px-2 text-red-500" onClick={() => {
-                      setStudentForm((f) => ({ ...f, items: f.items.filter((_, i) => i !== idx) }))
-                    }}>×</Button>
+          ) : (
+            <>
+              <div className="space-y-4 py-2">
+                <div className="space-y-1.5">
+                  <Label>Search Student *</Label>
+                  <Input
+                    placeholder="Type student name or reg#…"
+                    value={studentSearch}
+                    onChange={(e) => setStudentSearch(e.target.value)}
+                    className="h-9"
+                  />
+                  {studentOptions.length > 0 && (
+                    <div className="rounded-lg border max-h-36 overflow-y-auto">
+                      {studentOptions.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          className={cn(
+                            'w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors',
+                            studentForm.studentId === String(s.id) && 'bg-primary/10 font-medium'
+                          )}
+                          onClick={() => {
+                            setStudentForm((f) => ({
+                              ...f,
+                              studentId: String(s.id),
+                              studentName: `${s.firstName} ${s.lastName}`,
+                              classId: s.classId,
+                              feeStructureIds: [],
+                            }))
+                            setStudentSearch(`${s.firstName} ${s.lastName}`)
+                            setStudentOptions([])
+                          }}
+                        >
+                          {s.firstName} {s.lastName}{' '}
+                          <span className="text-muted-foreground text-xs">({s.registrationNumber})</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {studentForm.studentId && (
+                    <p className="text-xs text-emerald-700">Selected: {studentForm.studentName}</p>
                   )}
                 </div>
-              ))}
-              <Button variant="outline" size="sm" onClick={() => setStudentForm((f) => ({ ...f, items: [...f.items, { description: '', amount: '' }] }))}>
-                Add Item
-              </Button>
-              <p className="text-sm font-medium">Total: {formatRs(studentItemsTotal)}</p>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setStudentDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleGenerateStudent} disabled={generatingStudent}>
-              {generatingStudent ? 'Generating…' : 'Generate Voucher'}
-            </Button>
-          </DialogFooter>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Month *</Label>
+                    <Select
+                      value={studentForm.month}
+                      onValueChange={(v) => syncStudentDueDate(v ?? studentForm.month, studentForm.year)}
+                    >
+                      <SelectTrigger className="h-9 w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {MONTHS.map((m) => (
+                          <SelectItem key={m.value} value={String(m.value)}>{m.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Year *</Label>
+                    <Input
+                      type="number"
+                      value={studentForm.year}
+                      onChange={(e) => syncStudentDueDate(studentForm.month, e.target.value)}
+                      className="h-9"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label>Due Date *</Label>
+                  <Input
+                    type="date"
+                    value={studentForm.dueDate}
+                    onChange={(e) => setStudentForm((f) => ({ ...f, dueDate: e.target.value }))}
+                    className="h-9"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Select Fee Structures</Label>
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={allStudentFeesSelected}
+                        onChange={(e) => toggleSelectAllStudentFees(e.target.checked)}
+                        className="rounded"
+                        disabled={studentFeeStructures.length === 0}
+                      />
+                      Select All
+                    </label>
+                  </div>
+                  <div className="rounded-lg border p-3 space-y-2 max-h-48 overflow-y-auto">
+                    {studentFeeStructures.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No fee structures found.</p>
+                    ) : (
+                      studentFeeStructures.map((f) => (
+                        <label key={f.id} className="flex items-center gap-2 cursor-pointer text-sm">
+                          <input
+                            type="checkbox"
+                            checked={studentForm.feeStructureIds.includes(f.id)}
+                            onChange={() => toggleStudentFeeStructure(f.id)}
+                            className="rounded"
+                          />
+                          <span className="flex-1">{f.name}</span>
+                          <Badge variant="secondary" className="text-[10px]">{f.frequency}</Badge>
+                          <span className="text-muted-foreground">{formatRs(Number(f.amount))}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Additional Custom Items (Optional)</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Add any extra charges not in fee structures above
+                  </p>
+                  {studentForm.items.map((item, idx) => (
+                    <div key={idx} className="flex gap-2">
+                      <Input
+                        placeholder="Description"
+                        value={item.description}
+                        onChange={(e) => {
+                          const items = [...studentForm.items]
+                          items[idx] = { ...items[idx], description: e.target.value }
+                          setStudentForm((f) => ({ ...f, items }))
+                        }}
+                        className="h-9 flex-1"
+                      />
+                      <Input
+                        type="number"
+                        placeholder="Amount"
+                        value={item.amount}
+                        onChange={(e) => {
+                          const items = [...studentForm.items]
+                          items[idx] = { ...items[idx], amount: e.target.value }
+                          setStudentForm((f) => ({ ...f, items }))
+                        }}
+                        className="h-9 w-28"
+                      />
+                      {studentForm.items.length > 1 && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-9 px-2 text-red-500"
+                          onClick={() => {
+                            setStudentForm((f) => ({
+                              ...f,
+                              items: f.items.filter((_, i) => i !== idx),
+                            }))
+                          }}
+                        >
+                          ×
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setStudentForm((f) => ({
+                        ...f,
+                        items: [...f.items, { description: '', amount: '' }],
+                      }))
+                    }
+                  >
+                    Add Item
+                  </Button>
+                </div>
+
+                {(studentSelectedStructures.length > 0 || studentCustomItems.length > 0) && (
+                  <div className="rounded-lg border bg-slate-50 p-3 space-y-1.5 text-sm">
+                    <p className="font-semibold text-slate-800">Fee Summary:</p>
+                    {studentSelectedStructures.map((f) => (
+                      <div key={f.id} className="flex justify-between gap-2">
+                        <span className="text-muted-foreground">{f.name}</span>
+                        <span>{formatRs(Number(f.amount))}</span>
+                      </div>
+                    ))}
+                    {studentCustomItems.map((item, idx) => (
+                      <div key={`c-${idx}`} className="flex justify-between gap-2">
+                        <span className="text-muted-foreground">{item.description}</span>
+                        <span>{formatRs(item.amount)}</span>
+                      </div>
+                    ))}
+                    <div className="border-t pt-1.5 flex justify-between font-semibold">
+                      <span>TOTAL</span>
+                      <span>{formatRs(studentGrandTotal)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setStudentDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleGenerateStudent} disabled={generatingStudent}>
+                  {generatingStudent ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Generating…
+                    </>
+                  ) : (
+                    'Generate Voucher'
+                  )}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 
